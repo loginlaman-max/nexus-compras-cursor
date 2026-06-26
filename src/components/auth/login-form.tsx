@@ -19,24 +19,44 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
     setLoading(true);
     setError(null);
 
-    const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    try {
+      let supabase;
+      try {
+        supabase = createClient();
+      } catch {
+        setError(
+          "Supabase não configurado neste deploy. Cadastre NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY na Vercel e faça Redeploy.",
+        );
+        return;
+      }
 
-    if (signInError) {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (signInError) {
+        setError(
+          signInError.message === "Invalid login credentials"
+            ? "E-mail ou senha inválidos."
+            : signInError.message === "Email not confirmed"
+              ? "Confirme seu e-mail no Supabase (Authentication → Users → Confirm user)."
+              : signInError.message,
+        );
+        return;
+      }
+
+      router.push(redirectTo || AUTH_ROUTES.orgSelect);
+      router.refresh();
+    } catch (err) {
       setError(
-        signInError.message === "Invalid login credentials"
-          ? "E-mail ou senha inválidos."
-          : signInError.message,
+        err instanceof Error
+          ? err.message
+          : "Erro inesperado ao entrar. Tente novamente.",
       );
+    } finally {
       setLoading(false);
-      return;
     }
-
-    router.push(redirectTo || AUTH_ROUTES.orgSelect);
-    router.refresh();
   }
 
   return (
