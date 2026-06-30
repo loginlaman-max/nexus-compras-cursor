@@ -41,7 +41,7 @@ export function CalcField({
   accent?: boolean;
 }) {
   return (
-    <label className="nx-calc-field">
+    <div className="nx-calc-field">
       <span className="nx-calc-field-lb">{label}</span>
       <span className={`nx-calc-input${accent ? " is-accent" : ""}`}>
         {prefix ? <span className="nx-calc-aff">{prefix}</span> : null}
@@ -51,11 +51,12 @@ export function CalcField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onFocus={(e) => e.target.select()}
+          aria-label={label}
         />
         {suffix ? <span className="nx-calc-aff is-suf">{suffix}</span> : null}
       </span>
       {hint ? <span className="nx-calc-field-hint">{hint}</span> : null}
-    </label>
+    </div>
   );
 }
 

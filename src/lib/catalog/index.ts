@@ -129,7 +129,14 @@ export const STATUS_LABEL: Record<StockStatus, string> = {
   "sem-giro": "Sem giro",
 };
 
-export { drpDecisao, drpSugestoes, type DrpSugestaoRow } from "./drp";
+export {
+  drpDecisao,
+  drpDistribuicao,
+  drpSugestoes,
+  type DrpDistLinha,
+  type DrpDistribuicao,
+  type DrpSugestaoRow,
+} from "./drp";
 export {
   historicoPrecos,
   precoIndice,
@@ -156,12 +163,19 @@ export {
   MESES12,
   PEDIDOS_OTIF,
   filtrarPedidosPorPeriodo,
+  filtrarPedidosOtifPorPeriodo,
   otifGeral,
   otifPorFornecedor,
   otifTrend,
+  otifTrendForPeriod,
+  periodoRange,
+  periodoRangeOtif,
+  savingMetaAnual,
   savingPorFornecedor,
   savingTrend,
+  savingTrendForPeriod,
   type OtifGeral,
+  type OtifTrendPoint,
   type PedidoOtif,
   type SavingFornRow,
 } from "./otif-data";

@@ -1,2 +1,5 @@
-import { CalcFracionadaPageView } from "@/components/ferramentas/calc-extra-pages";
-export default function Page() { return <CalcFracionadaPageView />; }
+import { redirect } from "next/navigation";
+
+export default function Page() {
+  redirect("/ferramentas/calculadora?tab=fracionada");
+}

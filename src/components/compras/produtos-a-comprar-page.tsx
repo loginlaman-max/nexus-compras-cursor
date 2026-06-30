@@ -19,6 +19,10 @@ import { StatusPill } from "@/components/catalog/status-pill";
 import { TablePager } from "@/components/rel/table-pager";
 import { RelBanner } from "@/components/rel/rel-banner";
 import { useShell } from "@/components/providers/shell-provider";
+import {
+  openProductFromSku,
+  useCart,
+} from "@/components/providers/cart-provider";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -71,6 +75,7 @@ function buildCompraRows(filialId: string): CompraRow[] {
 
 export function ProdutosAComprarPageView() {
   const { filial } = useShell();
+  const { addToCart, openProductDetail } = useCart();
   const allRows = useMemo(() => buildCompraRows(filial), [filial]);
   const [showFilters, setShowFilters] = useState(false);
   const [fStatus, setFStatus] = useState<StockStatus[]>([]);
@@ -128,8 +133,19 @@ export function ProdutosAComprarPageView() {
     });
   }
 
-  function addToCart(row: CompraRow) {
-    toast.success(`${row.name.slice(0, 48)}… adicionado ao carrinho`);
+  function addRowToCart(row: CompraRow) {
+    addToCart({
+      sku: row.sku,
+      name: row.name,
+      preco: row.preco,
+      sugerido: row.sugerido,
+      forn: row.forn,
+    });
+  }
+
+  function fornKeyOf(fornNome: string) {
+    const p = PRODUTOS.find((x) => x.forn === fornNome);
+    return p?.fornKey ?? "hikvision";
   }
 
   return (
@@ -147,7 +163,7 @@ export function ProdutosAComprarPageView() {
               type="button"
               className="btn btn-primary-blue"
               onClick={() => {
-                selRows.forEach(addToCart);
+                selRows.forEach(addRowToCart);
                 toast.message("Cotação gerada", {
                   description: `${selRows.length} itens selecionados`,
                 });
@@ -252,7 +268,7 @@ export function ProdutosAComprarPageView() {
           </Button>
           <Button
             size="sm"
-            onClick={() => selRows.forEach(addToCart)}
+              onClick={() => selRows.forEach(addRowToCart)}
           >
             <ShoppingCart className="size-3.5" /> Adicionar ao carrinho
           </Button>
@@ -322,8 +338,9 @@ export function ProdutosAComprarPageView() {
                   <tr
                     key={r.sku}
                     className={`nx-row-click${sel.has(r.sku) ? " is-selected" : ""}`}
+                    onClick={() => openProductDetail(openProductFromSku(r.sku))}
                   >
-                    <td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={sel.has(r.sku)}
                         onCheckedChange={() => toggleRow(r.sku)}
@@ -337,7 +354,11 @@ export function ProdutosAComprarPageView() {
                       {r.name}
                     </td>
                     <td className="max-w-[150px] truncate text-muted-foreground">
-                      <Link href="/gestao-fornecedores" className="nx-link">
+                      <Link
+                        href={`/fornecedor/${fornKeyOf(r.forn)}`}
+                        className="nx-link"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {r.forn}
                       </Link>
                     </td>
@@ -369,11 +390,11 @@ export function ProdutosAComprarPageView() {
                     <td className="num mono">
                       {fmtBRL(r.sugerido * r.preco)}
                     </td>
-                    <td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
                         className="nx-rowbtn"
-                        onClick={() => addToCart(r)}
+                        onClick={() => addRowToCart(r)}
                       >
                         <Plus className="size-3.5" />
                       </button>

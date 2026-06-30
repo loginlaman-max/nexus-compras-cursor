@@ -1,0 +1,141 @@
+"use client";
+
+import type { LucideIcon } from "lucide-react";
+import {
+  AlertTriangle,
+  Archive,
+  ArrowLeftRight,
+  ArrowRight,
+  ArrowUpRight,
+  BarChart3,
+  BellOff,
+  Building2,
+  Check,
+  CheckCircle,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Circle,
+  Clock,
+  Cloud,
+  Download,
+  Eye,
+  FileInput,
+  FileText,
+  Filter,
+  GitFork,
+  Handshake,
+  Image,
+  Info,
+  LayoutGrid,
+  Link,
+  List,
+  Lock,
+  Mail,
+  Maximize2,
+  Minimize2,
+  Package,
+  Pencil,
+  Percent,
+  PiggyBank,
+  Printer,
+  Repeat,
+  RotateCcw,
+  Save,
+  Search,
+  Send,
+  ShieldAlert,
+  ShoppingCart,
+  Sparkles,
+  Tag,
+  Target,
+  Trash2,
+  TrendingDown,
+  TrendingUp,
+  Truck,
+  Upload,
+  Warehouse,
+  X,
+  XCircle,
+} from "lucide-react";
+
+const MAP: Record<string, LucideIcon> = {
+  "alert-triangle": AlertTriangle,
+  archive: Archive,
+  "arrow-left-right": ArrowLeftRight,
+  "arrow-right": ArrowRight,
+  "arrow-up-right": ArrowUpRight,
+  "bar-chart-3": BarChart3,
+  "bell-off": BellOff,
+  "building-2": Building2,
+  check: Check,
+  "check-circle": CheckCircle,
+  "chevron-down": ChevronDown,
+  "chevron-left": ChevronLeft,
+  "chevron-right": ChevronRight,
+  circle: Circle,
+  clock: Clock,
+  cloud: Cloud,
+  download: Download,
+  eye: Eye,
+  "file-input": FileInput,
+  "file-text": FileText,
+  filter: Filter,
+  "git-fork": GitFork,
+  handshake: Handshake,
+  image: Image,
+  info: Info,
+  "layout-grid": LayoutGrid,
+  link: Link,
+  list: List,
+  lock: Lock,
+  mail: Mail,
+  "maximize-2": Maximize2,
+  "minimize-2": Minimize2,
+  package: Package,
+  pencil: Pencil,
+  percent: Percent,
+  "piggy-bank": PiggyBank,
+  printer: Printer,
+  repeat: Repeat,
+  "rotate-ccw": RotateCcw,
+  save: Save,
+  search: Search,
+  send: Send,
+  "shield-alert": ShieldAlert,
+  "shopping-cart": ShoppingCart,
+  sparkles: Sparkles,
+  tag: Tag,
+  target: Target,
+  "trash-2": Trash2,
+  "trending-down": TrendingDown,
+  "trending-up": TrendingUp,
+  truck: Truck,
+  upload: Upload,
+  warehouse: Warehouse,
+  x: X,
+  "x-circle": XCircle,
+};
+
+export function NxIcon({
+  name,
+  size = 16,
+  className,
+  style,
+}: {
+  name: string;
+  size?: number;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const Icon = MAP[name] ?? Info;
+  return (
+    <Icon
+      className={className}
+      style={style}
+      size={size}
+      strokeWidth={2}
+      aria-hidden
+    />
+  );
+}

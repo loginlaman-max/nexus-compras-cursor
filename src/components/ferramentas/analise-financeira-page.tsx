@@ -1,69 +1,274 @@
 "use client";
 
-import { useMemo } from "react";
-import { BarChart3 } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  BarChart3,
+  FileSpreadsheet,
+  PackageCheck,
+  TrendingDown,
+} from "lucide-react";
+import { AfBarList } from "@/components/ferramentas/af-bar-list";
+import { AfDonut } from "@/components/ferramentas/af-donut";
+import { AfWaterfall } from "@/components/ferramentas/af-waterfall";
 import { RelBanner } from "@/components/rel/rel-banner";
-import { PRODUTOS, valorEstoque } from "@/lib/catalog";
 import { fmtCompactBRL } from "@/lib/format";
+import {
+  afAtividade,
+  afComputeBase,
+  afNum,
+  afTopFornecedores,
+  afTopMarcas,
+  afWaterfallSteps,
+  type AfActivityEvent,
+} from "@/lib/ferramentas/analise-financeira-data";
+
+function afPct(n: number) {
+  if (!Number.isFinite(n)) n = 0;
+  return (
+    n.toLocaleString("pt-BR", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }) + "%"
+  );
+}
+
+const FEED_ICONS = {
+  "package-check": PackageCheck,
+  "trending-down": TrendingDown,
+  "alert-triangle": AlertTriangle,
+  "file-spreadsheet": FileSpreadsheet,
+} as const;
+
+function AfFeedRow({ e }: { e: AfActivityEvent }) {
+  const Icon = FEED_ICONS[e.icon] ?? BarChart3;
+  return (
+    <div className="nx-fin-feed-row">
+      <span className={"nx-fin-feed-ic nx-af-feed-ic tone-" + e.tone}>
+        <Icon className="size-[15px]" />
+      </span>
+      <div className="nx-fin-feed-body">
+        <div className="nx-fin-feed-txt">{e.txt}</div>
+        <div className="nx-fin-feed-sub">{e.sub}</div>
+      </div>
+    </div>
+  );
+}
 
 export function AnaliseFinanceiraPageView() {
-  const metrics = useMemo(() => {
-    const fat = PRODUTOS.reduce((a, p) => a + p.v12m * p.preco, 0);
-    const custo = PRODUTOS.reduce((a, p) => a + p.v12m * p.custo, 0);
-    const estoque = PRODUTOS.reduce((a, p) => a + valorEstoque(p), 0);
-    const lucro = fat - custo;
-    const byForn: Record<string, number> = {};
-    PRODUTOS.forEach((p) => {
-      byForn[p.forn] = (byForn[p.forn] || 0) + p.v12m * p.preco;
-    });
-    const topForn = Object.entries(byForn)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
-    return { fat, custo, estoque, lucro, topForn };
-  }, []);
+  const [despPct, setDespPct] = useState("8");
+  const [impPct, setImpPct] = useState("12");
+
+  const dPct = Math.max(0, afNum(despPct));
+  const iPct = Math.max(0, afNum(impPct));
+
+  const base = useMemo(() => afComputeBase("matriz"), []);
+
+  const { faturamento, custoTotal } = base;
+  const despesas = (faturamento * dPct) / 100;
+  const impostos = (faturamento * iPct) / 100;
+  const margemBruta = faturamento - custoTotal;
+  const lucro = margemBruta - despesas - impostos;
+  const margemBrutaPct =
+    faturamento > 0 ? (margemBruta / faturamento) * 100 : 0;
+  const margemLiqPct = faturamento > 0 ? (lucro / faturamento) * 100 : 0;
+
+  const wfSteps = useMemo(
+    () =>
+      afWaterfallSteps(faturamento, custoTotal, despesas, impostos, lucro),
+    [faturamento, custoTotal, despesas, impostos, lucro],
+  );
+
+  const donutSeg = useMemo(
+    () => [
+      {
+        label: "Custo (CMV)",
+        value: custoTotal,
+        color: "hsl(var(--status-ruptura))",
+      },
+      {
+        label: "Despesas",
+        value: despesas,
+        color: "hsl(var(--status-baixo))",
+      },
+      {
+        label: "Impostos",
+        value: impostos,
+        color: "hsl(var(--status-critico))",
+      },
+      {
+        label: "Lucro",
+        value: Math.max(0, lucro),
+        color: "hsl(var(--status-ok))",
+      },
+    ],
+    [custoTotal, despesas, impostos, lucro],
+  );
+
+  const topForn = useMemo(
+    () => afTopFornecedores(base, afPct),
+    [base],
+  );
+  const topMarca = useMemo(() => afTopMarcas(base, afPct), [base]);
+  const atividade = useMemo(
+    () => afAtividade(base, fmtCompactBRL, "matriz"),
+    [base],
+  );
 
   return (
-    <div className="nx-fin nx-listpage">
+    <div className="nx-af nx-fin-page">
       <RelBanner
         icon={BarChart3}
         title="Análise Financeira"
-        subtitle="Decomposição faturamento → custo → lucro e concentração por fornecedor"
+        subtitle="Decomposição do resultado a partir do faturamento realizado (12 meses) e do custo efetivo por SKU. Ajuste despesas e impostos para simular o lucro."
       />
-      <div className="nx-rel-cards is-static">
-        {[
-          { l: "Faturamento 12m", v: fmtCompactBRL(metrics.fat) },
-          { l: "CMV 12m", v: fmtCompactBRL(metrics.custo) },
-          { l: "Lucro bruto", v: fmtCompactBRL(metrics.lucro) },
-          { l: "Capital em estoque", v: fmtCompactBRL(metrics.estoque) },
-        ].map((k) => (
-          <div key={k.l} className="nx-rel-card is-ind">
-            <div className="nx-rel-card-label">{k.l}</div>
-            <div className="nx-rel-card-value">{k.v}</div>
+
+      <div className="nx-fin-kpis">
+        <div className="card nx-fin-kpi">
+          <div className="nx-fin-kpi-lb">Faturamento (12m)</div>
+          <div className="nx-fin-kpi-val">{fmtCompactBRL(faturamento)}</div>
+          <div className="nx-fin-kpi-sub">{base.prods.length} SKUs ativos</div>
+        </div>
+        <div className="card nx-fin-kpi">
+          <div className="nx-fin-kpi-lb">Margem bruta</div>
+          <div className="nx-fin-kpi-val">{fmtCompactBRL(margemBruta)}</div>
+          <div className="nx-fin-kpi-sub tone-ok">
+            {afPct(margemBrutaPct)} sobre venda
           </div>
-        ))}
+        </div>
+        <div className="card nx-fin-kpi">
+          <div className="nx-fin-kpi-lb">Lucro estimado</div>
+          <div
+            className={
+              "nx-fin-kpi-val " + (lucro >= 0 ? "tone-ok" : "tone-danger")
+            }
+          >
+            {fmtCompactBRL(lucro)}
+          </div>
+          <div
+            className={
+              "nx-fin-kpi-sub " + (lucro >= 0 ? "tone-ok" : "tone-danger")
+            }
+          >
+            {afPct(margemLiqPct)} líquido
+          </div>
+        </div>
+        <div className="card nx-fin-kpi">
+          <div className="nx-fin-kpi-lb">Custo CMV</div>
+          <div className="nx-fin-kpi-val">{fmtCompactBRL(custoTotal)}</div>
+          <div className="nx-fin-kpi-sub">
+            {afPct(faturamento > 0 ? (custoTotal / faturamento) * 100 : 0)} do
+            faturamento
+          </div>
+        </div>
       </div>
-      <div className="card nx-fin-bars mt-3.5 p-4">
-        <div className="nx-calc-form-h mb-3">Top fornecedores por faturamento</div>
-        {metrics.topForn.map(([name, val], i) => (
-          <div key={name} className="nx-fin-bar-row">
-            <div className="nx-fin-bar-rank">{i + 1}</div>
-            <div className="nx-fin-bar-main">
-              <div className="nx-fin-bar-head">
-                <span className="nx-fin-bar-name">{name}</span>
-                <span className="nx-fin-bar-val">{fmtCompactBRL(val)}</span>
-              </div>
-              <div className="nx-fin-bar-track">
-                <div
-                  className="nx-fin-bar-fill"
-                  style={{
-                    width: `${(val / metrics.topForn[0][1]) * 100}%`,
-                    background: "hsl(var(--primary))",
-                  }}
-                />
-              </div>
+
+      <div className="nx-fin-grid">
+        <div className="card nx-fin-card nx-fin-wf-card">
+          <div className="nx-fin-cardhead">
+            <h2 className="type-h2">Da venda ao lucro</h2>
+            <div className="nx-fin-assump">
+              <label>
+                Despesas
+                <span className="nx-fin-inp">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={despPct}
+                    onChange={(e) => setDespPct(e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                  />
+                  <i>%</i>
+                </span>
+              </label>
+              <label>
+                Impostos
+                <span className="nx-fin-inp">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={impPct}
+                    onChange={(e) => setImpPct(e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                  />
+                  <i>%</i>
+                </span>
+              </label>
             </div>
           </div>
-        ))}
+          <AfWaterfall steps={wfSteps} />
+        </div>
+
+        <div className="card nx-fin-card nx-fin-donut-card">
+          <div className="nx-fin-cardhead">
+            <h2 className="type-h2">Composição do faturamento</h2>
+          </div>
+          <div className="nx-fin-donutwrap">
+            <AfDonut
+              segments={donutSeg}
+              center={
+                <>
+                  <div style={{ fontSize: 20, fontWeight: 700 }}>
+                    {afPct(margemLiqPct)}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: "hsl(var(--muted-foreground))",
+                    }}
+                  >
+                    lucro líq.
+                  </div>
+                </>
+              }
+            />
+            <div className="nx-fin-legend">
+              {donutSeg.map((s, i) => (
+                <div key={i} className="nx-fin-legend-row">
+                  <span
+                    className="nx-fin-legend-dot"
+                    style={{ background: s.color }}
+                  />
+                  <span className="nx-fin-legend-lb">{s.label}</span>
+                  <span className="nx-fin-legend-val">
+                    {afPct(
+                      faturamento > 0
+                        ? (Math.max(0, s.value) / faturamento) * 100
+                        : 0,
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="card nx-fin-card">
+          <div className="nx-fin-cardhead">
+            <h2 className="type-h2">Top fornecedores</h2>
+            <span className="nx-fin-cardhead-sub">por faturamento (12m)</span>
+          </div>
+          <AfBarList rows={topForn} />
+        </div>
+
+        <div className="card nx-fin-card">
+          <div className="nx-fin-cardhead">
+            <h2 className="type-h2">Top marcas</h2>
+            <span className="nx-fin-cardhead-sub">por faturamento (12m)</span>
+          </div>
+          <AfBarList rows={topMarca} />
+        </div>
+
+        <div className="card nx-fin-card nx-fin-feed-card">
+          <div className="nx-fin-cardhead">
+            <h2 className="type-h2">Atividade recente</h2>
+          </div>
+          <div className="nx-fin-feed">
+            {atividade.map((e, i) => (
+              <AfFeedRow key={i} e={e} />
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

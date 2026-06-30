@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   ArrowLeftRight,
+  Filter,
   GitBranch,
   GitMerge,
   Maximize2,
@@ -10,13 +11,24 @@ import {
   ShoppingCart,
   Store,
   Warehouse,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { RelBanner } from "@/components/rel/rel-banner";
 import { RelCards } from "@/components/rel/rel-cards";
+import {
+  SkuQuickDrawer,
+  ctxFromCfg,
+  vendaSerie,
+  type SkuQuickDrawerCfg,
+} from "@/components/rel/sku-quick-drawer";
 import { TablePager } from "@/components/rel/table-pager";
 import { Checkbox } from "@/components/ui/checkbox";
-import { drpSugestoes, type DrpSugestaoRow } from "@/lib/catalog";
+import {
+  openProductFromSku,
+  useCart,
+} from "@/components/providers/cart-provider";
+import { drpSugestoes, PRODUTOS, type DrpSugestaoRow } from "@/lib/catalog";
 import { fmtBRL, fmtInt } from "@/lib/format";
 import { usePager } from "@/hooks/use-pager";
 import { FILIAIS } from "@/lib/mock";
@@ -85,11 +97,82 @@ function FluxoFiliais({ filialAtiva }: { filialAtiva: string }) {
   );
 }
 
+function drpCfg(r: DrpSugestaoRow): SkuQuickDrawerCfg {
+  const p =
+    PRODUTOS.find((x) => x.codInt === r.codInt) ??
+    ({ codInt: r.codInt, v90: 0, v12m: 0 } as (typeof PRODUTOS)[0]);
+  const { serie, tend } = vendaSerie(p);
+  const diag =
+    r.acao === "transferir"
+      ? {
+          tone: "ok" as const,
+          icon: "arrow-left-right",
+          label: "Transferência cobre a necessidade",
+          detail: `A Matriz tem sobra de ${r.sobraMatriz} un. Transferir ${r.transferir} un evita compra externa e zera o risco em ${r.filialNome}.`,
+        }
+      : r.acao === "misto"
+        ? {
+            tone: "under" as const,
+            icon: "git-fork",
+            label: "Transferência parcial + compra",
+            detail: `Sobra de ${r.sobraMatriz} un na Matriz cobre parte. Transferir ${r.transferir} un e comprar ${r.comprar} un externamente.`,
+          }
+        : {
+            tone: "over" as const,
+            icon: "shopping-cart",
+            label: "Sem sobra na Matriz — comprar externo",
+            detail: `A Matriz não tem excedente. Necessário comprar ${r.comprar} un para ressuprir ${r.filialNome}.`,
+          };
+
+  return {
+    headerIcon: "git-fork",
+    headerTitle: "Análise de distribuição",
+    name: r.nome,
+    meta: `SKU ${r.codInt} · ${r.forn} · ${r.filialNome}`,
+    hero: [
+      {
+        k: "Necessário",
+        v: r.qtd,
+        unit: "un",
+        color: "hsl(var(--primary))",
+      },
+      {
+        k: "Cobertura filial",
+        v: r.cobFilial,
+        unit: "dias",
+        color:
+          r.cobFilial < 7 ? "hsl(var(--status-critico))" : undefined,
+      },
+      {
+        k: "Sobra Matriz",
+        v: r.sobraMatriz,
+        unit: "un",
+        color: "hsl(var(--status-ok))",
+      },
+    ],
+    diag,
+    stats: [
+      { k: "Estoque filial", v: `${r.estFilial} un` },
+      { k: "Estoque Matriz", v: `${r.estMatriz} un` },
+      { k: "Transferir", v: `${r.transferir || 0} un` },
+      { k: "Comprar", v: `${r.comprar || 0} un` },
+    ],
+    serie,
+    tend,
+    footer: {
+      label: "Valor a transferir",
+      value: fmtBRL((r.transferir || 0) * r.custo),
+    },
+  };
+}
+
 export function DrpPageView() {
+  const { openProductDetail } = useCart();
   const [filial, setFilial] = useState("pa");
   const [card, setCard] = useState("todos");
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [fs, setFs] = useState(false);
+  const [drawerRow, setDrawerRow] = useState<DrpSugestaoRow | null>(null);
 
   const filiais = FILIAIS.filter((f) => f.id !== "matriz");
   const rows = useMemo(() => drpSugestoes(filial), [filial]);
@@ -146,14 +229,23 @@ export function DrpPageView() {
     },
   ];
 
+  const selKeys = Object.keys(sel).filter((k) => sel[k]);
+  const filialNome = FILIAIS.find((f) => f.id === filial)?.nome ?? filial;
+  const activeCardLabel = cards.find((c) => c.id === card)?.label;
+
+  function toggle(codInt: string) {
+    setSel((s) => ({ ...s, [codInt]: !s[codInt] }));
+  }
+
   function exec() {
     const n =
-      Object.keys(sel).filter((k) => sel[k]).length ||
-      shown.filter((r) => r.transferir > 0).length;
-    toast.success(
-      `${n} transferência(s) geradas para ${FILIAIS.find((f) => f.id === filial)?.nome}`,
-    );
+      selKeys.length || shown.filter((r) => r.transferir > 0).length;
+    toast.success(`${n} transferência(s) geradas para ${filialNome}`);
     setSel({});
+  }
+
+  function openDrawer(r: DrpSugestaoRow) {
+    setDrawerRow(r);
   }
 
   return (
@@ -197,16 +289,35 @@ export function DrpPageView() {
       <div className={`card nx-fs nx-listpage-fill mt-3.5${fs ? " is-fs" : ""}`}>
         <div className="nx-cc-toolbar">
           <div className="nx-cc-tooltitle">
-            {shown.length} SKU{shown.length === 1 ? "" : "s"} ·{" "}
-            {FILIAIS.find((f) => f.id === filial)?.nome}
+            <GitBranch className="size-3.5" /> Sugestões de ressuprimento —{" "}
+            {filialNome}
+            {card !== "todos" && activeCardLabel && (
+              <span className="nx-rel-activefilter" style={{ marginLeft: 8 }}>
+                <Filter className="size-2.5" /> {activeCardLabel}
+                <button
+                  type="button"
+                  className="nx-rel-clear"
+                  onClick={() => setCard("todos")}
+                >
+                  <X className="size-2.5" />
+                </button>
+              </span>
+            )}
           </div>
           <div className="flex-1" />
-          <button type="button" className="btn btn-primary" onClick={exec}>
-            Gerar transferências
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={exec}
+            disabled={shown.filter((r) => r.transferir > 0).length === 0}
+          >
+            <ArrowLeftRight className="size-3" /> GERAR TRANSFERÊNCIA
+            {selKeys.length ? ` (${selKeys.length})` : ""}
           </button>
           <button
             type="button"
             className="nx-rowbtn"
+            title={fs ? "Recolher" : "Expandir"}
             onClick={() => setFs((v) => !v)}
           >
             {fs ? (
@@ -220,40 +331,61 @@ export function DrpPageView() {
           <table className="tbl tbl-drp">
             <thead>
               <tr>
-                <th style={{ width: 28 }} />
+                <th style={{ width: 30 }}>
+                  <input
+                    type="checkbox"
+                    onChange={(e) => {
+                      const all: Record<string, boolean> = {};
+                      if (e.target.checked) {
+                        shown.forEach((r) => {
+                          if (r.transferir > 0) all[r.codInt] = true;
+                        });
+                      }
+                      setSel(all);
+                    }}
+                  />
+                </th>
                 <th style={{ width: 80 }}>SKU</th>
                 <th>Produto</th>
                 <th style={{ width: 160 }}>Fornecedor</th>
-                <th className="num" style={{ width: 70 }}>
+                <th className="num" style={{ width: 80 }}>
                   Est. filial
                 </th>
-                <th className="num" style={{ width: 80 }}>
+                <th className="num" style={{ width: 90 }}>
                   Cobertura
                 </th>
-                <th className="num" style={{ width: 80 }}>
+                <th className="num" style={{ width: 90 }}>
                   Est. Matriz
                 </th>
-                <th className="num" style={{ width: 80 }}>
+                <th className="num" style={{ width: 90 }}>
                   Sobra CD
                 </th>
-                <th style={{ width: 100 }}>Ação</th>
-                <th className="num" style={{ width: 70 }}>
+                <th className="num" style={{ width: 90 }}>
                   Transf.
                 </th>
-                <th className="num" style={{ width: 70 }}>
+                <th className="num" style={{ width: 90 }}>
                   Comprar
                 </th>
+                <th style={{ width: 110 }}>Ação</th>
               </tr>
             </thead>
             <tbody>
               {pager.pageItems.map((r) => (
-                <tr key={r.codInt} className="nx-row-click">
+                <tr
+                  key={r.codInt}
+                  className="nx-row-click"
+                  onClick={(e) => {
+                    const t = e.target as HTMLElement;
+                    if (t.closest("button,input,a,label")) return;
+                    openDrawer(r);
+                  }}
+                >
                   <td>
-                    <Checkbox
+                    <input
+                      type="checkbox"
                       checked={!!sel[r.codInt]}
-                      onCheckedChange={() =>
-                        setSel((s) => ({ ...s, [r.codInt]: !s[r.codInt] }))
-                      }
+                      disabled={r.transferir <= 0}
+                      onChange={() => toggle(r.codInt)}
                     />
                   </td>
                   <td className="mono text-muted-foreground">{r.codInt}</td>
@@ -261,17 +393,80 @@ export function DrpPageView() {
                     {r.nome}
                   </td>
                   <td className="truncate text-muted-foreground">{r.forn}</td>
-                  <td className="num mono">{fmtInt(r.estFilial)}</td>
-                  <td className="num mono">{r.cobFilial} dias</td>
-                  <td className="num mono">{fmtInt(r.estMatriz)}</td>
-                  <td className="num mono">{fmtInt(r.sobraMatriz)}</td>
-                  <td>
-                    <AcaoBadge acao={r.acao} />
+                  <td
+                    className="num mono"
+                    style={{
+                      color:
+                        r.estFilial === 0
+                          ? "hsl(var(--status-ruptura))"
+                          : undefined,
+                    }}
+                  >
+                    {fmtInt(r.estFilial)}
                   </td>
-                  <td className="num mono">{r.transferir || "—"}</td>
-                  <td className="num mono">{r.comprar || "—"}</td>
+                  <td
+                    className="num mono"
+                    style={{
+                      color:
+                        r.cobFilial < 7
+                          ? "hsl(var(--status-critico))"
+                          : undefined,
+                    }}
+                  >
+                    {r.cobFilial} dias
+                  </td>
+                  <td className="num mono">{fmtInt(r.estMatriz)}</td>
+                  <td
+                    className="num mono"
+                    style={{ color: "hsl(var(--status-ok))" }}
+                  >
+                    {fmtInt(r.sobraMatriz)}
+                  </td>
+                  <td
+                    className="num mono"
+                    style={{
+                      color:
+                        r.transferir > 0
+                          ? "hsl(var(--status-ok))"
+                          : "hsl(var(--muted-foreground))",
+                      fontWeight: r.transferir > 0 ? 600 : 400,
+                    }}
+                  >
+                    {r.transferir || "—"}
+                  </td>
+                  <td
+                    className="num mono"
+                    style={{
+                      color:
+                        r.comprar > 0
+                          ? "hsl(var(--status-critico))"
+                          : "hsl(var(--muted-foreground))",
+                      fontWeight: r.comprar > 0 ? 600 : 400,
+                    }}
+                  >
+                    {r.comprar || "—"}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="border-0 bg-transparent p-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openDrawer(r);
+                      }}
+                    >
+                      <AcaoBadge acao={r.acao} />
+                    </button>
+                  </td>
                 </tr>
               ))}
+              {shown.length === 0 && (
+                <tr>
+                  <td colSpan={11} className="nx-rel-empty">
+                    Nenhuma sugestão nesta categoria
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -284,6 +479,21 @@ export function DrpPageView() {
           />
         )}
       </div>
+
+      <SkuQuickDrawer
+        cfg={drawerRow ? drpCfg(drawerRow) : null}
+        onClose={() => setDrawerRow(null)}
+        onFull={() => {
+          if (!drawerRow) return;
+          const cfg = drpCfg(drawerRow);
+          const row = drawerRow;
+          setDrawerRow(null);
+          openProductDetail({
+            ...openProductFromSku(row.codInt, "drp"),
+            desvioCtx: ctxFromCfg(cfg),
+          });
+        }}
+      />
     </div>
   );
 }

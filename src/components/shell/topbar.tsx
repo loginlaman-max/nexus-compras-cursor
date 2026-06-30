@@ -29,10 +29,10 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useShell } from "@/components/providers/shell-provider";
+import { useCart } from "@/components/providers/cart-provider";
 import { useOrg } from "@/components/providers/org-provider";
 import {
   ALERTAS,
-  CART_COUNT,
   FILIAIS_OPCOES,
   SEV_TOKEN,
   TENANT,
@@ -235,6 +235,7 @@ export function Topbar() {
     setFilial,
   } = useShell();
   const { activeOrg } = useOrg();
+  const { cartCount, openCart } = useCart();
   const [alertsOpen, setAlertsOpen] = useState(false);
   const dark = topbarVariant === "dark";
 
@@ -328,10 +329,10 @@ export function Topbar() {
         <AlertsPanel open={alertsOpen} onClose={() => setAlertsOpen(false)} />
       </div>
 
-      <button type="button" className="nx-icon-btn" title="Carrinho">
+      <button type="button" className="nx-icon-btn" title="Carrinho" onClick={openCart}>
         <ShoppingCart className="size-4" />
-        {CART_COUNT > 0 && (
-          <span className="nx-dot-num bg-primary">{CART_COUNT}</span>
+        {cartCount > 0 && (
+          <span className="nx-dot-num bg-primary">{cartCount > 9 ? "9+" : cartCount}</span>
         )}
       </button>
     </header>

@@ -1,6 +1,11 @@
+"use client";
+
+import { usePathname } from "next/navigation";
 import { Topbar } from "@/components/shell/topbar";
 import { Sidebar } from "@/components/shell/sidebar";
 import { AppErrorBoundary } from "@/components/shell/error-boundary";
+import { CartChrome } from "@/components/providers/cart-provider";
+import { NexusIAWidget } from "@/components/nexus-ia/nexus-ia-widget";
 
 export function AppShell({
   children,
@@ -9,6 +14,11 @@ export function AppShell({
   children: React.ReactNode;
   demo?: boolean;
 }) {
+  const pathname = usePathname();
+  const hideSidebar =
+    pathname.startsWith("/fornecedor") || pathname.startsWith("/configuracoes");
+  const hideNexusIA = pathname.startsWith("/configuracoes");
+
   return (
     <div className="nx-app">
       {demo && (
@@ -20,11 +30,13 @@ export function AppShell({
       )}
       <Topbar />
       <div className="nx-shell">
-        <Sidebar />
+        {!hideSidebar && <Sidebar />}
         <main className="nx-main">
           <AppErrorBoundary>{children}</AppErrorBoundary>
         </main>
       </div>
+      <CartChrome />
+      {!hideNexusIA && <NexusIAWidget />}
     </div>
   );
 }

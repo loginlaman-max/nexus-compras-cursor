@@ -19,6 +19,7 @@ interface RelShellProps<T extends Record<string, unknown>> {
   beforeTable?: ReactNode;
   hideBanner?: boolean;
   bannerActions?: ReactNode;
+  onRowClick?: (row: T) => void;
 }
 
 export function RelShell<T extends Record<string, unknown>>({
@@ -34,6 +35,7 @@ export function RelShell<T extends Record<string, unknown>>({
   beforeTable,
   hideBanner,
   bannerActions,
+  onRowClick,
 }: RelShellProps<T>) {
   const [active, setActive] = useState(defaultCard);
 
@@ -80,6 +82,7 @@ export function RelShell<T extends Record<string, unknown>>({
         perDefault={perPage}
         activeLabel={isAll ? null : activeCard?.label ?? null}
         onClear={() => setActive(defaultCard)}
+        onRowClick={onRowClick}
       />
     </div>
   );

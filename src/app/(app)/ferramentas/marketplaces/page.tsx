@@ -1,2 +1,5 @@
-import { CalcMarketplacePageView } from "@/components/ferramentas/calc-extra-pages";
-export default function Page() { return <CalcMarketplacePageView />; }
+import { redirect } from "next/navigation";
+
+export default function Page() {
+  redirect("/ferramentas/calculadora?tab=marketplaces");
+}

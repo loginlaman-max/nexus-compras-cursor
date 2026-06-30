@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import { ShellProvider } from "@/components/providers/shell-provider";
+import { CartProvider } from "@/components/providers/cart-provider";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -37,7 +38,9 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full">
-        <ShellProvider>{children}</ShellProvider>
+        <ShellProvider>
+          <CartProvider>{children}</CartProvider>
+        </ShellProvider>
         <Toaster />
       </body>
     </html>

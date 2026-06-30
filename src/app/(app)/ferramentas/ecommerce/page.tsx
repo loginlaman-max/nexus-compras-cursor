@@ -1,2 +1,5 @@
-import { CalcEcommercePageView } from "@/components/ferramentas/calc-extra-pages";
-export default function Page() { return <CalcEcommercePageView />; }
+import { redirect } from "next/navigation";
+
+export default function Page() {
+  redirect("/ferramentas/calculadora?tab=ecommerce");
+}

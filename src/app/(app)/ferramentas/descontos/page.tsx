@@ -1,2 +1,5 @@
-import { CalcDescontosPageView } from "@/components/ferramentas/calc-descontos-page";
-export default function Page() { return <CalcDescontosPageView />; }
+import { redirect } from "next/navigation";
+
+export default function Page() {
+  redirect("/ferramentas/calculadora?tab=descontos");
+}

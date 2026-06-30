@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 import {
   Building2,
   ChevronRight,
@@ -28,6 +29,7 @@ import {
 import { fmtCompactBRL } from "@/lib/format";
 
 export function GestaoFornecedoresPageView() {
+  const router = useRouter();
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<"metas" | "comercial">("metas");
   const [fs, setFs] = useState(false);
@@ -209,7 +211,11 @@ export function GestaoFornecedoresPageView() {
                 {paged.map((r) => {
                   const st = r.sellInStatus;
                   return (
-                    <tr key={r.key} className="nx-row-click">
+                    <tr
+                      key={r.key}
+                      className="nx-row-click"
+                      onClick={() => router.push(`/fornecedor/${r.key}`)}
+                    >
                       <td className="font-medium">{r.nome}</td>
                       <td className="num mono">{r.skus}</td>
                       <td className="num mono">
@@ -276,7 +282,11 @@ export function GestaoFornecedoresPageView() {
                         )}
                       </td>
                       <td>
-                        <Link href="/gestao-fornecedores" className="nx-rowbtn">
+                        <Link
+                          href={`/fornecedor/${r.key}`}
+                          className="nx-rowbtn"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <ChevronRight className="size-3.5" />
                         </Link>
                       </td>
@@ -308,7 +318,11 @@ export function GestaoFornecedoresPageView() {
               </thead>
               <tbody>
                 {paged.map((r) => (
-                  <tr key={r.key} className="nx-row-click">
+                  <tr
+                    key={r.key}
+                    className="nx-row-click"
+                    onClick={() => router.push(`/fornecedor/${r.key}`)}
+                  >
                     <td className="font-medium">{r.nome}</td>
                     <td className="mono text-muted-foreground">{r.cnpj}</td>
                     <td className="num mono">{r.leadTime} dias</td>

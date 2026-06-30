@@ -128,22 +128,25 @@ export interface OtifGeral {
   foraOtif: number;
 }
 
-export function otifGeral(): OtifGeral {
-  const n = PEDIDOS_OTIF.length;
-  const ot = (PEDIDOS_OTIF.filter((o) => o.onTime).length / n) * 100;
-  const inf = (PEDIDOS_OTIF.filter((o) => o.inFull).length / n) * 100;
+export function otifGeral(pedidos: PedidoOtif[] = PEDIDOS_OTIF): OtifGeral {
+  const n = pedidos.length;
+  if (n === 0) {
+    return { ot: 0, inf: 0, otif: 0, pedidos: 0, foraOtif: 0 };
+  }
+  const ot = (pedidos.filter((o) => o.onTime).length / n) * 100;
+  const inf = (pedidos.filter((o) => o.inFull).length / n) * 100;
   return {
     ot: +ot.toFixed(1),
     inf: +inf.toFixed(1),
     otif: +((ot * inf) / 100).toFixed(1),
     pedidos: n,
-    foraOtif: PEDIDOS_OTIF.filter((o) => !(o.onTime && o.inFull)).length,
+    foraOtif: pedidos.filter((o) => !(o.onTime && o.inFull)).length,
   };
 }
 
-export function otifTrend() {
+export function otifTrend(pedidos: PedidoOtif[] = PEDIDOS_OTIF) {
   return MESES12.map((m) => {
-    const ped = PEDIDOS_OTIF.filter((o) => o.mes === m);
+    const ped = pedidos.filter((o) => o.mes === m);
     if (!ped.length) return { m, otif: 0, ot: 0, inf: 0 };
     const ot = (ped.filter((o) => o.onTime).length / ped.length) * 100;
     const inf = (ped.filter((o) => o.inFull).length / ped.length) * 100;
@@ -154,6 +157,59 @@ export function otifTrend() {
       otif: +((ot * inf) / 100).toFixed(1),
     };
   });
+}
+
+/** Range de mesIdx para filtros OTIF (7d / 30d / 90d / 12m). */
+export function periodoRangeOtif(periodo: string): [number, number] {
+  switch (periodo) {
+    case "7 dias":
+    case "30 dias":
+      return [11, 11];
+    case "90 dias":
+      return [9, 11];
+    case "12 meses":
+    default:
+      return [0, 11];
+  }
+}
+
+export function filtrarPedidosOtifPorPeriodo(periodo: string): PedidoOtif[] {
+  const [minIdx, maxIdx] = periodoRangeOtif(periodo);
+  let ped = PEDIDOS_OTIF.filter(
+    (o) => o.mesIdx >= minIdx && o.mesIdx <= maxIdx,
+  );
+  if (periodo === "7 dias") {
+    ped = ped.filter((o) => (o.qtdPedida + o.atraso + o.mesIdx) % 10 < 3);
+  }
+  return ped;
+}
+
+/** Trend mensal só nos meses cobertos pelo período OTIF. */
+export function otifTrendForPeriod(
+  pedidos: PedidoOtif[],
+  periodo: string,
+): OtifTrendPoint[] {
+  const [minIdx, maxIdx] = periodoRangeOtif(periodo);
+  return MESES12.slice(minIdx, maxIdx + 1).map((m, i) => {
+    const mIdx = minIdx + i;
+    const ped = pedidos.filter((o) => o.mesIdx === mIdx);
+    if (!ped.length) return { m, otif: 0, ot: 0, inf: 0 };
+    const ot = (ped.filter((o) => o.onTime).length / ped.length) * 100;
+    const inf = (ped.filter((o) => o.inFull).length / ped.length) * 100;
+    return {
+      m,
+      ot: +ot.toFixed(1),
+      inf: +inf.toFixed(1),
+      otif: +((ot * inf) / 100).toFixed(1),
+    };
+  });
+}
+
+export interface OtifTrendPoint {
+  m: string;
+  otif: number;
+  ot: number;
+  inf: number;
 }
 
 export interface SavingFornRow {
@@ -203,7 +259,7 @@ export function savingPorFornecedor(
     .sort((a, b) => b.saving - a.saving);
 }
 
-export function otifPorFornecedor() {
+export function otifPorFornecedor(pedidos: PedidoOtif[] = PEDIDOS_OTIF) {
   const map: Record<
     string,
     {
@@ -217,7 +273,7 @@ export function otifPorFornecedor() {
     }
   > = {};
 
-  PEDIDOS_OTIF.forEach((o) => {
+  pedidos.forEach((o) => {
     if (!map[o.fornKey]) {
       map[o.fornKey] = {
         fornKey: o.fornKey,
@@ -262,25 +318,46 @@ export function savingTrend(pedidos: PedidoOtif[] = PEDIDOS_OTIF) {
   });
 }
 
-export function filtrarPedidosPorPeriodo(periodo: string): PedidoOtif[] {
-  let minIdx = 0;
-  let maxIdx = 11;
+export function periodoRange(periodo: string): [number, number] {
   switch (periodo) {
     case "30 dias":
-      minIdx = 11;
-      maxIdx = 11;
-      break;
+      return [11, 11];
     case "90 dias":
-      minIdx = 9;
-      maxIdx = 11;
-      break;
+      return [9, 11];
     case "YTD":
-      minIdx = 6;
-      maxIdx = 11;
-      break;
+      return [6, 11];
     default:
-      break;
+      return [0, 11];
   }
+}
+
+/** Trend mensal apenas nos meses do período selecionado (espelho Saving.jsx). */
+export function savingTrendForPeriod(
+  pedidos: PedidoOtif[],
+  periodo: string,
+) {
+  const [minIdx, maxIdx] = periodoRange(periodo);
+  return MESES12.slice(minIdx, maxIdx + 1).map((m, i) => {
+    const mIdx = minIdx + i;
+    const ped = pedidos.filter((o) => o.mesIdx === mIdx);
+    const val = ped.reduce(
+      (a, o) => a + o.qtdPedida * (o.precoTabela - o.precoNegociado),
+      0,
+    );
+    return { m, val: +val.toFixed(0) };
+  });
+}
+
+export function savingMetaAnual(): number {
+  const total = PEDIDOS_OTIF.reduce(
+    (a, o) => a + o.qtdPedida * (o.precoTabela - o.precoNegociado),
+    0,
+  );
+  return Math.ceil(total / 50000) * 50000 * 1.2;
+}
+
+export function filtrarPedidosPorPeriodo(periodo: string): PedidoOtif[] {
+  const [minIdx, maxIdx] = periodoRange(periodo);
   return PEDIDOS_OTIF.filter(
     (o) => o.mesIdx >= minIdx && o.mesIdx <= maxIdx,
   );

@@ -157,6 +157,7 @@ export function rupturaRows() {
           : Math.max(1, p.leadTime - cob);
       return {
         sku: p.codInt,
+        codForn: p.codForn || "—",
         nome: p.nome,
         forn: p.forn,
         curva: p.curvaF,

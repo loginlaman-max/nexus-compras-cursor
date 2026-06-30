@@ -22,6 +22,15 @@ export interface PedidoCompra {
   st: PedidoStatus;
   emissaoStr: string;
   previsaoStr: string;
+  _itens?: {
+    cod: string;
+    codForn: string;
+    nome: string;
+    qtd: number;
+    preco: number;
+    total: number;
+    tabela: number;
+  }[];
 }
 
 export const PEDIDO_STATUS_LABEL: Record<

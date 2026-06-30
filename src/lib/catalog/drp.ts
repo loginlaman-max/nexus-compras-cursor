@@ -79,3 +79,97 @@ export function drpSugestoes(filialId: string): DrpSugestaoRow[] {
     return [row];
   }).sort((a, b) => a.cobFilial - b.cobFilial);
 }
+
+export interface DrpDistLinha {
+  id: string;
+  nome: string;
+  uf?: string;
+  cd: boolean;
+  est: number;
+  vDia: number;
+  cob: number;
+  need: number;
+  transferir: number;
+  comprar: number;
+  fonte?: boolean;
+}
+
+export interface DrpDistribuicao {
+  codInt: string;
+  nome: string;
+  custo: number;
+  estMatriz: number;
+  esegMatriz: number;
+  sobraMatriz: number;
+  sobraRestante: number;
+  linhas: DrpDistLinha[];
+  totalNeed: number;
+  totalTransf: number;
+  totalCompra: number;
+  economia: number;
+}
+
+/** Distribuição de um SKU entre filiais (compra × transferência da Matriz). */
+export function drpDistribuicao(codInt: string): DrpDistribuicao | null {
+  const matrizP = PRODUTOS.find((x) => x.codInt === codInt);
+  if (!matrizP) return null;
+  const sobraTotal = Math.max(0, matrizP.est - (matrizP.eseg || 0));
+  let sobra = sobraTotal;
+  const needMatriz = Math.max(0, sugerido(matrizP));
+  const fils = FILIAIS.filter((f) => f.id !== "matriz");
+  const linhas: DrpDistLinha[] = fils.map((f) => {
+    const sp = scopeProduto(matrizP, f.id);
+    return {
+      id: f.id,
+      nome: f.nome,
+      uf: f.uf,
+      cd: false,
+      est: sp.est,
+      vDia: sp.vDia,
+      cob: cobertura(sp),
+      need: Math.max(0, sugerido(sp)),
+      transferir: 0,
+      comprar: 0,
+    };
+  });
+  linhas
+    .slice()
+    .sort((a, b) => a.cob - b.cob)
+    .forEach((l) => {
+      const t = Math.min(l.need, sobra);
+      l.transferir = t;
+      sobra -= t;
+      l.comprar = l.need - t;
+    });
+  const matrizLinha: DrpDistLinha = {
+    id: "matriz",
+    nome: "Matriz PA",
+    uf: "PA",
+    cd: true,
+    est: matrizP.est,
+    vDia: matrizP.vDia,
+    cob: cobertura(matrizP),
+    need: needMatriz,
+    transferir: 0,
+    comprar: needMatriz,
+    fonte: true,
+  };
+  const todas = [matrizLinha, ...linhas];
+  const totalNeed = todas.reduce((a, l) => a + l.need, 0);
+  const totalTransf = linhas.reduce((a, l) => a + l.transferir, 0);
+  const totalCompra = todas.reduce((a, l) => a + l.comprar, 0);
+  return {
+    codInt,
+    nome: matrizP.nome,
+    custo: matrizP.custo,
+    estMatriz: matrizP.est,
+    esegMatriz: matrizP.eseg || 0,
+    sobraMatriz: sobraTotal,
+    sobraRestante: sobra,
+    linhas: todas,
+    totalNeed,
+    totalTransf,
+    totalCompra,
+    economia: totalTransf * (matrizP.custo || 0),
+  };
+}

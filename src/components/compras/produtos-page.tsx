@@ -6,6 +6,10 @@ import { RelShell } from "@/components/rel/rel-shell";
 import type { RelColumn } from "@/components/rel/rel-table";
 import { useShell } from "@/components/providers/shell-provider";
 import {
+  openProductFromSku,
+  useCart,
+} from "@/components/providers/cart-provider";
+import {
   activeProdutos,
   cobertura,
   STATUS_LABEL,
@@ -131,6 +135,7 @@ const COLS: RelColumn<ProdRow>[] = [
 
 export function ProdutosPageView() {
   const { filial } = useShell();
+  const { openProductDetail } = useCart();
   const rows = buildProdRows(filial);
 
   const cards = [
@@ -179,6 +184,9 @@ export function ProdutosPageView() {
         cols={COLS}
         rows={rows}
         csv
+        onRowClick={(r) =>
+          openProductDetail(openProductFromSku(r.cod, "Produtos"))
+        }
       />
     </div>
   );

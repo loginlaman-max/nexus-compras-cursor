@@ -4,13 +4,10 @@ import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   FileText,
-  Scissors,
-  ShoppingBag,
-  Store,
   Truck,
 } from "lucide-react";
 import { RelBanner } from "@/components/rel/rel-banner";
-import { CalcField, CalcStat, tbBRL, tbNum, tbPct } from "./calc-shared";
+import { CalcField, CalcStat, tbBRL, tbNum } from "./calc-shared";
 
 function SimpleCalcPage({
   icon: Icon,
@@ -57,82 +54,6 @@ function SimpleCalcPage({
         </div>
       </div>
     </div>
-  );
-}
-
-export function CalcMarketplacePageView() {
-  const [custo, setCusto] = useState("120,00");
-  const [com, setCom] = useState("11");
-  const [margem, setMargem] = useState("15");
-  const c = tbNum(custo), co = tbNum(com), mg = tbNum(margem);
-  const pv = co + mg < 100 ? c / (1 - (co + mg) / 100) : 0;
-  const lucro = pv * (mg / 100);
-  return (
-    <SimpleCalcPage
-      icon={Store}
-      title="Calculadora de Marketplaces"
-      subtitle="Preço no anúncio cobrindo comissão e margem"
-      fields={[
-        { label: "Custo", prefix: "R$", value: custo, onChange: setCusto },
-        { label: "Comissão", suffix: "%", value: com, onChange: setCom },
-        { label: "Margem", suffix: "%", value: margem, onChange: setMargem },
-      ]}
-      heroLabel="Preço no anúncio"
-      heroValue={tbBRL(pv)}
-      heroSub={`Lucro ${tbBRL(lucro)}`}
-      stats={[
-        { label: "Comissão", value: tbBRL(pv * co / 100) },
-        { label: "Margem real", value: tbPct(mg) },
-      ]}
-    />
-  );
-}
-
-export function CalcEcommercePageView() {
-  const [custo, setCusto] = useState("120,00");
-  const [margem, setMargem] = useState("35");
-  const [aVista, setAVista] = useState("7");
-  const c = tbNum(custo), mg = tbNum(margem), av = tbNum(aVista);
-  const por = mg < 100 ? c / (1 - mg / 100) : 0;
-  const vista = por * (1 - av / 100);
-  return (
-    <SimpleCalcPage
-      icon={ShoppingBag}
-      title="Calculadora E-commerce"
-      subtitle="Escada De / Por / À vista"
-      fields={[
-        { label: "Custo", prefix: "R$", value: custo, onChange: setCusto },
-        { label: "Margem (cartão)", suffix: "%", value: margem, onChange: setMargem },
-        { label: "Desconto à vista", suffix: "%", value: aVista, onChange: setAVista },
-      ]}
-      heroLabel="Preço Por (cartão)"
-      heroValue={tbBRL(por)}
-      heroSub={`À vista ${tbBRL(vista)}`}
-    />
-  );
-}
-
-export function CalcFracionadaPageView() {
-  const [custo, setCusto] = useState("48,00");
-  const [qtd, setQtd] = useState("100");
-  const [venda, setVenda] = useState("0,75");
-  const c = tbNum(custo), q = tbNum(qtd), v = tbNum(venda);
-  const receita = q * v;
-  const margem = receita > 0 ? ((receita - c) / receita) * 100 : 0;
-  return (
-    <SimpleCalcPage
-      icon={Scissors}
-      title="Venda Fracionada"
-      subtitle="Precifique unidades avulsas a partir do custo da embalagem"
-      fields={[
-        { label: "Custo embalagem", prefix: "R$", value: custo, onChange: setCusto },
-        { label: "Unidades", value: qtd, onChange: setQtd },
-        { label: "Preço unitário", prefix: "R$", value: venda, onChange: setVenda },
-      ]}
-      heroLabel="Receita total"
-      heroValue={tbBRL(receita)}
-      heroSub={`Margem ${tbPct(margem)}`}
-    />
   );
 }
 

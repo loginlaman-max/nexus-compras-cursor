@@ -1,135 +1,181 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { FileText, Maximize2, Minimize2, Search } from "lucide-react";
-import { RelBanner } from "@/components/rel/rel-banner";
-import { TablePager } from "@/components/rel/table-pager";
-import { Input } from "@/components/ui/input";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { FileText } from "lucide-react";
+import { PedidoDetail } from "@/components/compras/pedido-detail";
+import { NxIcon } from "@/components/nx/nx-icon";
+import { RelShell } from "@/components/rel/rel-shell";
+import type { RelColumn } from "@/components/rel/rel-table";
 import {
-  PEDIDOS_COMPRA,
+  getAllPedidos,
+  statusEfetivo,
+  type PedidoDecisao,
+} from "@/lib/catalog/pedidos-utils";
+import {
   PEDIDO_STATUS_LABEL,
   type PedidoCompra,
 } from "@/lib/catalog";
 import { fmtBRL } from "@/lib/format";
+import { nxStore } from "@/lib/store/nx-store";
+
+type PedidoRow = PedidoCompra & Record<string, unknown>;
+
+function PedStatusPill({ st }: { st: string }) {
+  const s =
+    PEDIDO_STATUS_LABEL[st as keyof typeof PEDIDO_STATUS_LABEL] ??
+    PEDIDO_STATUS_LABEL.pendente;
+  return <span className={"pill " + s.pill}>{s.label}</span>;
+}
 
 export function PedidosComprasPageView() {
-  const [q, setQ] = useState("");
-  const [fs, setFs] = useState(false);
-  const [page, setPage] = useState(1);
-  const [per, setPer] = useState(12);
+  const [pedido, setPedido] = useState<PedidoCompra | null>(null);
+  const [tick, setTick] = useState(0);
+  const [decisions, setDecisions] = useState<Record<string, PedidoDecisao>>({});
 
-  const rows = useMemo(
-    () =>
-      PEDIDOS_COMPRA.filter(
-        (p) =>
-          !q ||
-          p.num.toLowerCase().includes(q.toLowerCase()) ||
-          p.forn.toLowerCase().includes(q.toLowerCase()) ||
-          p.comprador.toLowerCase().includes(q.toLowerCase()),
-      ),
-    [q],
+  const reload = useCallback(() => {
+    setDecisions(nxStore.get("pedidos_decisions", {}));
+    setTick((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    reload();
+    const onStore = (e: Event) => {
+      const key = (e as CustomEvent<{ key?: string }>).detail?.key;
+      if (!key || key === "pedidos_extra" || key === "pedidos_decisions") {
+        reload();
+      }
+    };
+    const onRefresh = () => reload();
+    window.addEventListener("nx-store", onStore);
+    window.addEventListener("nx-pedidos-refresh", onRefresh);
+    return () => {
+      window.removeEventListener("nx-store", onStore);
+      window.removeEventListener("nx-pedidos-refresh", onRefresh);
+    };
+  }, [reload]);
+
+  const rows = useMemo((): PedidoRow[] => {
+    void tick;
+    return getAllPedidos() as PedidoRow[];
+  }, [tick]);
+
+  const stOf = useCallback(
+    (p: PedidoCompra) => statusEfetivo(p, decisions),
+    [decisions],
   );
 
-  const totalPages = Math.max(1, Math.ceil(rows.length / per));
-  const safePage = Math.min(page, totalPages);
-  const from = rows.length ? (safePage - 1) * per + 1 : 0;
-  const to = Math.min(safePage * per, rows.length);
-  const paged = rows.slice((safePage - 1) * per, safePage * per);
+  const cards = useMemo(
+    () => [
+      {
+        id: "aguardando",
+        label: "Aguardando aprovação",
+        sub: "Acima da alçada",
+        filter: (r: PedidoRow) => stOf(r) === "aguardando",
+      },
+      {
+        id: "aprovado",
+        label: "Aprovados",
+        sub: "Liberados p/ envio",
+        filter: (r: PedidoRow) => stOf(r) === "aprovado",
+      },
+      {
+        id: "transito",
+        label: "Em Trânsito",
+        sub: "A caminho",
+        filter: (r: PedidoRow) => r.st === "transito",
+      },
+      {
+        id: "recebido",
+        label: "Recebidos",
+        sub: "Entrada concluída",
+        filter: (r: PedidoRow) => r.st === "recebido",
+      },
+      {
+        id: "todos",
+        label: "Total de Pedidos",
+        sub: "Últimos 90 dias",
+      },
+    ],
+    [stOf],
+  );
 
-  return (
-    <div className="nx-listpage">
-      <RelBanner
-        icon={FileText}
-        title="Pedidos de Compra"
-        subtitle="Histórico e acompanhamento · integração Bling ERP"
-      />
-
-      <div className={`card nx-fs nx-listpage-fill mt-3.5${fs ? " is-fs" : ""}`}>
-        <div className="nx-cc-toolbar">
-          <div className="nx-cc-tooltitle">{rows.length} pedidos</div>
-          <div className="flex-1" />
+  const cols: RelColumn<PedidoRow>[] = useMemo(
+    () => [
+      {
+        key: "num",
+        label: "Nº Pedido",
+        width: 90,
+        mono: true,
+      },
+      { key: "forn", label: "Fornecedor", truncate: true },
+      {
+        key: "comprador",
+        label: "Comprador",
+        width: 130,
+        render: (r) => (
+          <span style={{ color: "hsl(var(--muted-foreground))" }}>
+            {r.comprador}
+          </span>
+        ),
+      },
+      { key: "emissaoStr", label: "Emissão", width: 100, mono: true },
+      { key: "previsaoStr", label: "Previsão", width: 100, mono: true },
+      { key: "itens", label: "Itens", align: "right", width: 70 },
+      {
+        key: "valor",
+        label: "Valor Total",
+        align: "right",
+        width: 130,
+        render: (r) => (
+          <span style={{ fontWeight: 600 }}>{fmtBRL(r.valor)}</span>
+        ),
+      },
+      {
+        key: "st",
+        label: "Status",
+        width: 110,
+        sortable: false,
+        render: (r) => <PedStatusPill st={stOf(r)} />,
+      },
+      {
+        key: "acao",
+        label: "",
+        width: 44,
+        sortable: false,
+        render: (r) => (
           <button
             type="button"
             className="nx-rowbtn"
-            onClick={() => setFs((v) => !v)}
+            title="Ver pedido"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPedido(r);
+            }}
           >
-            {fs ? (
-              <Minimize2 className="size-3.5" />
-            ) : (
-              <Maximize2 className="size-3.5" />
-            )}
+            <NxIcon name="eye" size={13} />
           </button>
-          <label className="field" style={{ width: 260 }}>
-            <Search className="size-3.5 shrink-0 text-muted-foreground" />
-            <Input
-              placeholder="Buscar pedido, fornecedor..."
-              value={q}
-              onChange={(e) => {
-                setQ(e.target.value);
-                setPage(1);
-              }}
-              className="h-auto border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
-            />
-          </label>
-        </div>
-        <div className="nx-tblscroll">
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th style={{ width: 100 }}>Nº Pedido</th>
-                <th>Fornecedor</th>
-                <th style={{ width: 140 }}>Comprador</th>
-                <th style={{ width: 90 }}>Emissão</th>
-                <th style={{ width: 90 }}>Previsão</th>
-                <th className="num" style={{ width: 60 }}>
-                  Itens
-                </th>
-                <th className="num" style={{ width: 110 }}>
-                  Valor
-                </th>
-                <th style={{ width: 140 }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paged.map((p: PedidoCompra) => {
-                const st = PEDIDO_STATUS_LABEL[p.st];
-                return (
-                  <tr key={p.num} className="nx-row-click">
-                    <td className="mono font-medium">{p.num}</td>
-                    <td className="max-w-[240px] truncate">{p.forn}</td>
-                    <td className="text-muted-foreground">{p.comprador}</td>
-                    <td className="mono text-muted-foreground">
-                      {p.emissaoStr}
-                    </td>
-                    <td className="mono text-muted-foreground">
-                      {p.previsaoStr}
-                    </td>
-                    <td className="num mono">{p.itens}</td>
-                    <td className="num mono">{fmtBRL(p.valor)}</td>
-                    <td>
-                      <span className={`pill ${st.pill}`}>{st.label}</span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <TablePager
-          from={from}
-          to={to}
-          total={rows.length}
-          page={safePage}
-          totalPages={totalPages}
-          per={per}
-          unitLabel="pedidos"
-          onPage={setPage}
-          onPer={(n) => {
-            setPer(n);
-            setPage(1);
-          }}
-        />
-      </div>
+        ),
+      },
+    ],
+    [stOf],
+  );
+
+  return (
+    <div className="nx-pedpage">
+      <RelShell
+        icon={FileText}
+        title="Pedidos de Compra"
+        subtitle="Pedidos emitidos · sincronizados com o Bling ERP"
+        cards={cards}
+        defaultCard="todos"
+        cols={cols}
+        rows={rows}
+        csv
+        onRowClick={(r) => setPedido(r)}
+      />
+      {pedido && (
+        <PedidoDetail pedido={pedido} onClose={() => setPedido(null)} />
+      )}
     </div>
   );
 }

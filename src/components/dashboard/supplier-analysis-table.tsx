@@ -294,9 +294,10 @@ export function SupplierAnalysisTable({ filialId }: SupplierAnalysisTableProps) 
                   <td>
                     {!r.isTotal && (
                       <Link
-                        href="/gestao-fornecedores"
+                        href={`/fornecedor/${r.fornKey}`}
                         className="nx-rowbtn nx-rowbtn-cart inline-flex"
                         title="Abrir fornecedor"
+                        onClick={(e) => e.stopPropagation()}
                       >
                         <ShoppingCart className="size-3" />
                       </Link>
