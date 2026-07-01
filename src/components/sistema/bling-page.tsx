@@ -24,14 +24,15 @@ import { useOrg } from "@/components/providers/org-provider";
 import { SetDialog } from "@/components/sistema/configuracoes/config-shared";
 import { useFiliaisIntegracao } from "@/hooks/use-filiais-integracao";
 import {
+  BLING_RATE_LIMIT_RPS,
   defaultWebhooks,
   defaultWhAcoes,
+  formatRelative,
+  logsToRows,
+  mergeEntidades,
+  nextSyncLabel,
   STATUS_MAP,
-  SYNC_ENTIDADES_DEFAULT,
-  SYNC_LOGS_DEMO,
   WEBHOOK_DEFS,
-  type SyncEntidade,
-  type SyncLogRow,
   type WebhookKey,
   type WhAcoes,
 } from "@/lib/bling/page-data";
@@ -67,20 +68,25 @@ type BlingStatus = {
     duration_ms: number | null;
     started_at: string;
   }[];
-  totais: { produtos: number; fornecedores: number; estoque_linhas: number };
+  entidades?: {
+    id: string;
+    registros: number;
+    last_sync_at: string | null;
+    last_status: "sucesso" | "parcial" | "erro" | "pendente" | null;
+    last_mensagem: string | null;
+  }[];
+  last_sync_at?: string | null;
+  cron_interval_min?: number;
+  totais: {
+    produtos: number;
+    fornecedores: number;
+    estoque_linhas: number;
+    notas?: number;
+    vendas_linhas?: number;
+    filiais?: number;
+  };
   conectadas: number;
 };
-
-function formatRelative(iso: string | null): string {
-  if (!iso) return "nunca";
-  const diff = Date.now() - new Date(iso).getTime();
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return "agora";
-  if (min < 60) return `há ${min} min`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `há ${h} h`;
-  return `há ${Math.floor(h / 24)} dias`;
-}
 
 function formatTokenRenewal(iso: string | null): string {
   if (!iso) return "—";
@@ -92,74 +98,10 @@ function formatTokenRenewal(iso: string | null): string {
   return `renova em ${h}h`;
 }
 
-function formatDuration(ms: number | null): string {
-  if (ms == null) return "—";
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1).replace(".", ",")}s`;
-}
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
 function copyText(text: string, onSaved?: (msg: string) => void) {
   void navigator.clipboard?.writeText(text);
   onSaved?.("URL copiada");
   toast.success("Copiado para a área de transferência");
-}
-
-function loadEnts(saved: Record<string, boolean> | null): SyncEntidade[] {
-  return SYNC_ENTIDADES_DEFAULT.map((e) => ({
-    ...e,
-    on: saved?.[e.id] != null ? saved[e.id]! : e.on,
-  }));
-}
-
-function mergeEntsFromApi(
-  ents: SyncEntidade[],
-  status: BlingStatus | null,
-  demo: boolean,
-): SyncEntidade[] {
-  if (!status || demo) return ents;
-  const last = formatRelative(status.conexoes[0]?.last_sync_at ?? null);
-  const counts: Record<string, number> = {
-    produtos: status.totais.produtos,
-    contatos: status.totais.fornecedores,
-    estoque: status.totais.estoque_linhas,
-  };
-  return ents.map((e) => ({
-    ...e,
-    registros: counts[e.id] ?? e.registros,
-    last: counts[e.id] != null ? last : e.last,
-    status:
-      counts[e.id] != null && counts[e.id]! > 0
-        ? "sucesso"
-        : e.on
-          ? e.status
-          : e.status,
-  }));
-}
-
-function logsFromApi(
-  logs: BlingStatus["logs"],
-  demo: boolean,
-): SyncLogRow[] {
-  if (demo || logs.length === 0) return SYNC_LOGS_DEMO;
-  return logs.map((l) => ({
-    fn: l.funcao,
-    hora: formatTime(l.started_at),
-    dur: formatDuration(l.duration_ms),
-    reg: l.registros.toLocaleString("pt-BR"),
-    status:
-      l.status === "sucesso" || l.status === "parcial" || l.status === "erro"
-        ? l.status
-        : "erro",
-    msg: l.mensagem ?? "—",
-  }));
 }
 
 export function BlingPageView({
@@ -191,8 +133,8 @@ export function BlingPageView({
     redirect_uri: "",
   });
 
-  const [ents, setEnts] = useState<SyncEntidade[]>(() =>
-    loadEnts(nxStore.get<Record<string, boolean> | null>("bling_sync", null)),
+  const [syncToggles, setSyncToggles] = useState<Record<string, boolean> | null>(
+    () => nxStore.get<Record<string, boolean> | null>("bling_sync", null),
   );
   const [webhooks, setWebhooks] = useState<Record<string, boolean>>(() => ({
     ...defaultWebhooks(),
@@ -280,11 +222,15 @@ export function BlingPageView({
   }, [loadStatus, loadCredentials]);
 
   const displayEnts = useMemo(
-    () => mergeEntsFromApi(ents, status, demo),
-    [ents, status, demo],
+    () =>
+      mergeEntidades(syncToggles, status?.entidades ?? [], demo).map((e) => ({
+        ...e,
+        on: syncToggles?.[e.id] ?? e.on,
+      })),
+    [syncToggles, status?.entidades, demo],
   );
   const syncLogs = useMemo(
-    () => logsFromApi(status?.logs ?? [], demo),
+    () => logsToRows(status?.logs ?? [], demo),
     [status?.logs, demo],
   );
 
@@ -298,6 +244,10 @@ export function BlingPageView({
     .filter((e) => e.on)
     .reduce((s, e) => s + e.registros, 0);
 
+  const proximaSync = nextSyncLabel(
+    status?.last_sync_at ?? primeira?.last_sync_at ?? null,
+  );
+
   const credentialsReady =
     appCred.secret_set || !!status?.bling_configured;
 
@@ -309,17 +259,12 @@ export function BlingPageView({
     !demo && credentialsReady && serviceRoleReady;
 
   const toggleEnt = (id: string) => {
-    setEnts((prev) => {
-      const next = prev.map((e) =>
-        e.id === id ? { ...e, on: !e.on } : e,
+    setSyncToggles((prev) => {
+      const base = prev ?? Object.fromEntries(
+        displayEnts.map((e) => [e.id, e.on]),
       );
-      nxStore.set(
-        "bling_sync",
-        next.reduce<Record<string, boolean>>((a, e) => {
-          a[e.id] = e.on;
-          return a;
-        }, {}),
-      );
+      const next = { ...base, [id]: !base[id] };
+      nxStore.set("bling_sync", next);
       return next;
     });
   };
@@ -594,8 +539,10 @@ export function BlingPageView({
           </div>
           <div>
             <span className="l">Última sincronização</span>
-            <span className="v ok">
-              {formatRelative(primeira?.last_sync_at ?? null)}
+            <span className="v">
+              {formatRelative(
+                status?.last_sync_at ?? primeira?.last_sync_at ?? null,
+              )}
             </span>
           </div>
         </div>
@@ -699,7 +646,7 @@ export function BlingPageView({
             <div className="card kpi">
               <div className="kpi-label">Rate limit Bling</div>
               <div className="kpi-value">
-                0,7
+                {BLING_RATE_LIMIT_RPS.toString().replace(".", ",")}
                 <span
                   style={{
                     fontSize: 13,
@@ -714,7 +661,7 @@ export function BlingPageView({
             <div className="card kpi">
               <div className="kpi-label">Próxima sync (cron)</div>
               <div className="kpi-value" style={{ fontSize: 18 }}>
-                em 24 min
+                {demo ? "em 24 min" : proximaSync}
               </div>
             </div>
           </div>
@@ -789,10 +736,16 @@ export function BlingPageView({
                 </h3>
                 <div className="nx-bling-rate">
                   <div className="nx-bling-rate-bar">
-                    <div style={{ width: "62%" }} />
+                    <div
+                      style={{
+                        width: demo ? "62%" : conectado ? "8%" : "0%",
+                      }}
+                    />
                   </div>
                   <div className="type-caption">
-                    0,43 / 0,7 req/s · 62% da janela
+                    {demo
+                      ? "0,43 / 0,7 req/s · 62% da janela"
+                      : `Limite oficial ${BLING_RATE_LIMIT_RPS.toString().replace(".", ",")} req/s · uso estimado baixo`}
                   </div>
                 </div>
                 <p className="type-caption" style={{ marginTop: 10 }}>
@@ -941,6 +894,22 @@ export function BlingPageView({
                 </tr>
               </thead>
               <tbody>
+                {!demo && syncLogs.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      style={{
+                        textAlign: "center",
+                        padding: 24,
+                        color: "hsl(var(--muted-foreground))",
+                      }}
+                    >
+                      Nenhuma sincronização registrada. Clique em{" "}
+                      <strong>Sincronizar agora</strong> para importar dados do
+                      Bling.
+                    </td>
+                  </tr>
+                )}
                 {syncLogs.map((l, i) => {
                   const st = STATUS_MAP[l.status];
                   return (
