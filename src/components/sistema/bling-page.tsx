@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  ArrowLeft,
   Key,
   LayoutDashboard,
   Plug,
@@ -25,18 +26,40 @@ const TABS = [
   { id: "webhooks", label: "Webhooks", icon: Webhook },
 ] as const;
 
-export function BlingPageView() {
+export function BlingPageView({
+  embedded,
+  onBack,
+  onSaved,
+}: {
+  embedded?: boolean;
+  onBack?: () => void;
+  onSaved?: (msg: string) => void;
+} = {}) {
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("visao");
   const [ents, setEnts] = useState(SYNC_ENTIDADES);
 
   return (
-    <div className="nx-bling">
+    <div className={embedded ? "nx-set-content" : "nx-bling"}>
+      {embedded && onBack && (
+        <button
+          type="button"
+          className="nx-set-back"
+          style={{ width: "auto", marginBottom: 12 }}
+          onClick={onBack}
+        >
+          <ArrowLeft size={15} /> Voltar às integrações
+        </button>
+      )}
       <RelBanner
         icon={Plug}
         title="Bling ERP v3"
         subtitle="Integração OAuth 2.0 · sincronização automática a cada 30 minutos"
         actions={
-          <button type="button" className="btn btn-secondary">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => onSaved?.("Sincronização iniciada")}
+          >
             <RefreshCw className="size-3.5" /> Sincronizar agora
           </button>
         }

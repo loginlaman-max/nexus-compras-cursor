@@ -206,3 +206,11 @@ export {
   type Guardrail,
   type GuardrailNivel,
 } from "./pricing";
+export { MARCAS, categoriaDe, marcaDe } from "./attributes";
+export {
+  MARKUP_TABLES,
+  SEG_TABELA,
+  markupPctFromRules,
+  resolveMarkupRules,
+  type MarkupTableDef,
+} from "./markup-rules";

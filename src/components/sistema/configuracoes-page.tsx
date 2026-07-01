@@ -1,85 +1,187 @@
 "use client";
 
-import { useState } from "react";
-import { Building2, Percent, Settings, Users } from "lucide-react";
-import { RelBanner } from "@/components/rel/rel-banner";
+import { useState, type ReactNode } from "react";
+import Link from "next/link";
+import {
+  ArrowLeft,
+  BadgeCheck,
+  Bell,
+  Building2,
+  GitFork,
+  Handshake,
+  Hash,
+  History,
+  Key,
+  Percent,
+  Plug,
+  Settings,
+  ShieldCheck,
+  UserPlus,
+  Users,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { useSaveToast } from "@/hooks/use-save-toast";
+import { BlingPageView } from "@/components/sistema/bling-page";
+import {
+  SetCondComerciais,
+  SetEmpresa,
+  SetFiliais,
+  SetIntegracoes,
+  SetMarkup,
+  SetMembros,
+  SetNotificacoes,
+  SetNumeracao,
+  SetPerfis,
+  SetSoon,
+  SetUsuarios,
+} from "@/components/sistema/configuracoes";
 
-const NAV = [
-  { group: "Organização", items: [{ id: "empresa", icon: Building2, label: "Empresa" }] },
-  { group: "Acesso", items: [{ id: "usuarios", icon: Users, label: "Usuários" }] },
-  { group: "Plataforma", items: [{ id: "markup", icon: Percent, label: "Tabelas de Markup" }] },
+type SecId =
+  | "empresa"
+  | "filiais"
+  | "usuarios"
+  | "perfis"
+  | "membros"
+  | "markup"
+  | "cond-comerciais"
+  | "numeracao"
+  | "integracoes"
+  | "notificacoes"
+  | "api"
+  | "auditoria"
+  | "licenciamento";
+
+interface NavItem {
+  id: SecId;
+  icon: LucideIcon;
+  label: string;
+  soon?: boolean;
+}
+
+const SET_NAV: { group: string; items: NavItem[] }[] = [
+  {
+    group: "Organização",
+    items: [
+      { id: "empresa", icon: Building2, label: "Empresa" },
+      { id: "filiais", icon: GitFork, label: "Filiais" },
+    ],
+  },
+  {
+    group: "Acesso",
+    items: [
+      { id: "usuarios", icon: Users, label: "Usuários" },
+      { id: "perfis", icon: ShieldCheck, label: "Perfis e Permissões" },
+      { id: "membros", icon: UserPlus, label: "Organização & Convites" },
+    ],
+  },
+  {
+    group: "Plataforma",
+    items: [
+      { id: "markup", icon: Percent, label: "Tabelas de Markup" },
+      { id: "cond-comerciais", icon: Handshake, label: "Condições Comerciais" },
+      { id: "numeracao", icon: Hash, label: "Numeração de Documentos" },
+      { id: "integracoes", icon: Plug, label: "Integrações" },
+      { id: "notificacoes", icon: Bell, label: "Notificações" },
+      { id: "api", icon: Key, label: "API e Tokens", soon: true },
+      { id: "auditoria", icon: History, label: "Auditoria", soon: true },
+      {
+        id: "licenciamento",
+        icon: BadgeCheck,
+        label: "Licenciamento",
+        soon: true,
+      },
+    ],
+  },
 ];
 
 export function ConfiguracoesPageView() {
-  const [tab, setTab] = useState("empresa");
-  const [empresa, setEmpresa] = useState({
-    razao: "Nexus Compras Distribuição LTDA",
-    fantasia: "Nexus Compras",
-    cnpj: "12.345.678/0001-90",
-    email: "contato@nexuscompras.com.br",
-  });
+  const [sec, setSec] = useState<SecId>("empresa");
+  const [manage, setManage] = useState<"bling" | null>(null);
+  const toast = useSaveToast();
+  const onSaved = toast.show;
+
+  const allItems = SET_NAV.flatMap((g) => g.items);
+  const cur = allItems.find((i) => i.id === sec);
+
+  let content: ReactNode;
+  if (manage === "bling") {
+    content = (
+      <BlingPageView
+        embedded
+        onBack={() => setManage(null)}
+        onSaved={onSaved}
+      />
+    );
+  } else if (cur?.soon) {
+    content = <SetSoon label={cur.label} />;
+  } else if (sec === "empresa") {
+    content = <SetEmpresa onSaved={onSaved} />;
+  } else if (sec === "filiais") {
+    content = <SetFiliais onSaved={onSaved} />;
+  } else if (sec === "usuarios") {
+    content = <SetUsuarios onSaved={onSaved} />;
+  } else if (sec === "perfis") {
+    content = <SetPerfis onSaved={onSaved} />;
+  } else if (sec === "membros") {
+    content = <SetMembros onSaved={onSaved} />;
+  } else if (sec === "markup") {
+    content = <SetMarkup onSaved={onSaved} />;
+  } else if (sec === "cond-comerciais") {
+    content = <SetCondComerciais onSaved={onSaved} />;
+  } else if (sec === "numeracao") {
+    content = <SetNumeracao onSaved={onSaved} />;
+  } else if (sec === "integracoes") {
+    content = (
+      <SetIntegracoes
+        onManage={(it) => {
+          if (/bling/i.test(it.nome)) setManage("bling");
+        }}
+        onSaved={onSaved}
+      />
+    );
+  } else if (sec === "notificacoes") {
+    content = <SetNotificacoes onSaved={onSaved} />;
+  }
 
   return (
     <div className="nx-set">
-      <nav className="nx-set-nav">
+      {toast.node}
+      <aside className="nx-set-nav">
+        <Link href="/dashboard" className="nx-set-back">
+          <ArrowLeft size={15} /> Voltar ao app
+        </Link>
         <div className="nx-set-nav-title">
-          <Settings className="size-4" /> Configurações
+          <Settings size={15} /> Configurações
         </div>
-        {NAV.map((g) => (
+        {SET_NAV.map((g) => (
           <div key={g.group} className="nx-set-nav-group">
             <div className="nx-set-nav-label">{g.group}</div>
             {g.items.map((it) => {
               const Icon = it.icon;
               return (
-                <button key={it.id} type="button" className={`nx-set-nav-item${tab === it.id ? " is-active" : ""}`} onClick={() => setTab(it.id)}>
-                  <Icon className="size-3.5" /> {it.label}
+                <button
+                  key={it.id}
+                  type="button"
+                  className={
+                    "nx-set-nav-item " + (sec === it.id ? "is-active" : "")
+                  }
+                  onClick={() => {
+                    setManage(null);
+                    setSec(it.id);
+                  }}
+                >
+                  <Icon size={15} />
+                  <span>{it.label}</span>
+                  {it.soon && (
+                    <span className="nx-set-soon-tag">em breve</span>
+                  )}
                 </button>
               );
             })}
           </div>
         ))}
-      </nav>
-      <div className="nx-set-content p-4">
-        {tab === "empresa" && (
-          <div className="card nx-set-card">
-            <div className="nx-set-cardhead">Empresa</div>
-            <div className="nx-set-grid p-4">
-              <label className="nx-set-field full">Razão Social<input value={empresa.razao} onChange={(e) => setEmpresa({ ...empresa, razao: e.target.value })} /></label>
-              <label className="nx-set-field">Nome Fantasia<input value={empresa.fantasia} onChange={(e) => setEmpresa({ ...empresa, fantasia: e.target.value })} /></label>
-              <label className="nx-set-field">CNPJ<input value={empresa.cnpj} onChange={(e) => setEmpresa({ ...empresa, cnpj: e.target.value })} /></label>
-              <label className="nx-set-field full">E-mail<input value={empresa.email} onChange={(e) => setEmpresa({ ...empresa, email: e.target.value })} /></label>
-            </div>
-            <div className="nx-set-foot">
-              <button type="button" className="btn btn-primary">Salvar alterações</button>
-            </div>
-          </div>
-        )}
-        {tab === "usuarios" && (
-          <div className="card p-4">
-            <p className="type-caption mb-3">Usuários da organização</p>
-            <table className="tbl">
-              <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th></tr></thead>
-              <tbody>
-                <tr><td>Douglas Jardel</td><td>douglas@nexus.com.br</td><td>Admin</td></tr>
-                <tr><td>Jailson Barros</td><td>jailson@nexus.com.br</td><td>Comprador</td></tr>
-                <tr><td>Rayane Aline</td><td>rayane@nexus.com.br</td><td>Comprador</td></tr>
-              </tbody>
-            </table>
-          </div>
-        )}
-        {tab === "markup" && (
-          <div className="card p-4">
-            <table className="tbl">
-              <thead><tr><th>Tabela</th><th className="num">Markup %</th><th>Descrição</th></tr></thead>
-              <tbody>
-                <tr><td>PP</td><td className="num">35%</td><td>Fixação, iluminação</td></tr>
-                <tr><td>PSD</td><td className="num">50%</td><td>Redes, energia, áudio</td></tr>
-                <tr><td>PSCF</td><td className="num">80%</td><td>CFTV, acesso</td></tr>
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      </aside>
+      <div className="nx-set-main">{content}</div>
     </div>
   );
 }

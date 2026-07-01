@@ -418,24 +418,45 @@ export interface Database {
           id: string;
           org_id: string;
           nome: string;
+          status: string | null;
+          canal: string | null;
+          moeda: string | null;
+          observacoes: string | null;
           vigencia_ini: string | null;
           vigencia_fim: string | null;
+          escopo: Json | null;
+          markup: Json | null;
+          atualizado: string | null;
           created_at: string | null;
         };
         Insert: {
           id?: string;
           org_id: string;
           nome: string;
+          status?: string | null;
+          canal?: string | null;
+          moeda?: string | null;
+          observacoes?: string | null;
           vigencia_ini?: string | null;
           vigencia_fim?: string | null;
+          escopo?: Json | null;
+          markup?: Json | null;
+          atualizado?: string | null;
           created_at?: string | null;
         };
         Update: {
           id?: string;
           org_id?: string;
           nome?: string;
+          status?: string | null;
+          canal?: string | null;
+          moeda?: string | null;
+          observacoes?: string | null;
           vigencia_ini?: string | null;
           vigencia_fim?: string | null;
+          escopo?: Json | null;
+          markup?: Json | null;
+          atualizado?: string | null;
           created_at?: string | null;
         };
         Relationships: [
@@ -452,21 +473,24 @@ export interface Database {
         Row: {
           id: string;
           tabela_id: string;
-          produto_id: string;
+          produto_id: string | null;
+          sku_cod: string | null;
           markup_pct: number | null;
           preco_venda: number | null;
         };
         Insert: {
           id?: string;
           tabela_id: string;
-          produto_id: string;
+          produto_id?: string | null;
+          sku_cod?: string | null;
           markup_pct?: number | null;
           preco_venda?: number | null;
         };
         Update: {
           id?: string;
           tabela_id?: string;
-          produto_id?: string;
+          produto_id?: string | null;
+          sku_cod?: string | null;
           markup_pct?: number | null;
           preco_venda?: number | null;
         };
