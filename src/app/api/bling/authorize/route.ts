@@ -1,25 +1,20 @@
 import { NextResponse } from "next/server";
 import { BLING_AUTH_URL, getBlingCredentials } from "@/lib/bling/config";
+import { blingConfigRedirect } from "@/lib/bling/redirect";
 import { encodeState } from "@/lib/bling/oauth";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET(request: Request) {
   const creds = getBlingCredentials();
   if (!creds) {
-    return NextResponse.json(
-      { error: "Bling não configurado (BLING_CLIENT_ID / BLING_CLIENT_SECRET)" },
-      { status: 503 },
-    );
+    return blingConfigRedirect(request, "erro", "bling_nao_configurado");
   }
 
   const { searchParams } = new URL(request.url);
   const filialId = searchParams.get("filial_id");
   const orgId = searchParams.get("org_id");
   if (!filialId || !orgId) {
-    return NextResponse.json(
-      { error: "filial_id e org_id são obrigatórios" },
-      { status: 400 },
-    );
+    return blingConfigRedirect(request, "erro", "parametros_invalidos");
   }
 
   const supabase = await createClient();
@@ -37,7 +32,7 @@ export async function GET(request: Request) {
     .eq("user_id", user.id)
     .maybeSingle();
   if (!membro) {
-    return NextResponse.json({ error: "Sem permissão na organização" }, { status: 403 });
+    return blingConfigRedirect(request, "erro", "sem_permissao");
   }
 
   const state = encodeState({

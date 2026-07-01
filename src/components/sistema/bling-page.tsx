@@ -1,26 +1,40 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  Box,
+  Check,
+  Copy,
+  Eye,
+  EyeOff,
+  FileDown,
+  Gauge,
+  Info,
   Key,
   LayoutDashboard,
-  Plug,
   RefreshCw,
+  Save,
+  Unplug,
   Webhook,
 } from "lucide-react";
-import { RelBanner } from "@/components/rel/rel-banner";
 import { useCatalog } from "@/components/providers/catalog-provider";
 import { useOrg } from "@/components/providers/org-provider";
+import {
+  defaultWebhooks,
+  defaultWhAcoes,
+  STATUS_MAP,
+  SYNC_ENTIDADES_DEFAULT,
+  SYNC_LOGS_DEMO,
+  WEBHOOK_DEFS,
+  type SyncEntidade,
+  type SyncLogRow,
+  type WebhookKey,
+  type WhAcoes,
+} from "@/lib/bling/page-data";
+import { nxStore } from "@/lib/store/nx-store";
 import { isDemoMode } from "@/lib/supabase/env";
 import { toast } from "sonner";
-
-const ENTIDADES = [
-  { id: "produtos", label: "Produtos" },
-  { id: "contatos", label: "Fornecedores & Clientes" },
-  { id: "estoque", label: "Estoque" },
-  { id: "vendas", label: "Vendas históricas" },
-];
 
 const TABS = [
   { id: "visao", label: "Visão Geral", icon: LayoutDashboard },
@@ -28,6 +42,8 @@ const TABS = [
   { id: "credenciais", label: "Credenciais", icon: Key },
   { id: "webhooks", label: "Webhooks", icon: Webhook },
 ] as const;
+
+type TabId = (typeof TABS)[number]["id"];
 
 type BlingStatus = {
   bling_configured: boolean;
@@ -37,6 +53,14 @@ type BlingStatus = {
     conta_nome: string | null;
     last_sync_at: string | null;
     expires_at: string | null;
+  }[];
+  logs: {
+    funcao: string;
+    status: string;
+    registros: number;
+    mensagem: string | null;
+    duration_ms: number | null;
+    started_at: string;
   }[];
   totais: { produtos: number; fornecedores: number; estoque_linhas: number };
   conectadas: number;
@@ -49,8 +73,88 @@ function formatRelative(iso: string | null): string {
   if (min < 1) return "agora";
   if (min < 60) return `há ${min} min`;
   const h = Math.floor(min / 60);
-  if (h < 24) return `há ${h}h`;
+  if (h < 24) return `há ${h} h`;
   return `há ${Math.floor(h / 24)} dias`;
+}
+
+function formatTokenRenewal(iso: string | null): string {
+  if (!iso) return "—";
+  const diff = new Date(iso).getTime() - Date.now();
+  if (diff <= 0) return "expirado";
+  const min = Math.ceil(diff / 60000);
+  if (min < 60) return `renova em ${min} min`;
+  const h = Math.floor(min / 60);
+  return `renova em ${h}h`;
+}
+
+function formatDuration(ms: number | null): string {
+  if (ms == null) return "—";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1).replace(".", ",")}s`;
+}
+
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function copyText(text: string, onSaved?: (msg: string) => void) {
+  void navigator.clipboard?.writeText(text);
+  onSaved?.("URL copiada");
+  toast.success("Copiado para a área de transferência");
+}
+
+function loadEnts(saved: Record<string, boolean> | null): SyncEntidade[] {
+  return SYNC_ENTIDADES_DEFAULT.map((e) => ({
+    ...e,
+    on: saved?.[e.id] != null ? saved[e.id]! : e.on,
+  }));
+}
+
+function mergeEntsFromApi(
+  ents: SyncEntidade[],
+  status: BlingStatus | null,
+  demo: boolean,
+): SyncEntidade[] {
+  if (!status || demo) return ents;
+  const last = formatRelative(status.conexoes[0]?.last_sync_at ?? null);
+  const counts: Record<string, number> = {
+    produtos: status.totais.produtos,
+    contatos: status.totais.fornecedores,
+    estoque: status.totais.estoque_linhas,
+  };
+  return ents.map((e) => ({
+    ...e,
+    registros: counts[e.id] ?? e.registros,
+    last: counts[e.id] != null ? last : e.last,
+    status:
+      counts[e.id] != null && counts[e.id]! > 0
+        ? "sucesso"
+        : e.on
+          ? e.status
+          : e.status,
+  }));
+}
+
+function logsFromApi(
+  logs: BlingStatus["logs"],
+  demo: boolean,
+): SyncLogRow[] {
+  if (demo || logs.length === 0) return SYNC_LOGS_DEMO;
+  return logs.map((l) => ({
+    fn: l.funcao,
+    hora: formatTime(l.started_at),
+    dur: formatDuration(l.duration_ms),
+    reg: l.registros.toLocaleString("pt-BR"),
+    status:
+      l.status === "sucesso" || l.status === "parcial" || l.status === "erro"
+        ? l.status
+        : "erro",
+    msg: l.mensagem ?? "—",
+  }));
 }
 
 export function BlingPageView({
@@ -65,15 +169,37 @@ export function BlingPageView({
   const { activeOrg } = useOrg();
   const { refresh: refreshCatalog } = useCatalog();
   const demo = isDemoMode();
-  const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("visao");
+
+  const [tab, setTab] = useState<TabId>("visao");
   const [status, setStatus] = useState<BlingStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [entsOn, setEntsOn] = useState<Record<string, boolean>>({
-    produtos: true,
-    contatos: true,
-    estoque: true,
-    vendas: true,
+  const [showSecret, setShowSecret] = useState(false);
+
+  const [ents, setEnts] = useState<SyncEntidade[]>(() =>
+    loadEnts(nxStore.get<Record<string, boolean> | null>("bling_sync", null)),
+  );
+  const [cred, setCred] = useState(() => {
+    const saved = nxStore.get<Partial<typeof defaultCred>>("bling_cred", {});
+    return { ...defaultCred(), ...saved };
   });
+  const [webhooks, setWebhooks] = useState<Record<string, boolean>>(() => ({
+    ...defaultWebhooks(),
+    ...nxStore.get<Record<string, boolean>>("bling_webhooks", {}),
+  }));
+  const [whAcoes, setWhAcoes] = useState<WhAcoes>(() => ({
+    ...defaultWhAcoes(),
+    ...nxStore.get<Partial<WhAcoes>>("bling_wh_acoes", {}),
+  }));
+
+  const redirectUri =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/api/bling/callback`
+      : "/api/bling/callback";
+
+  const webhookBase =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/api/webhooks/bling`
+      : "https://app.nexuscompras.com.br/webhooks/bling";
 
   const loadStatus = useCallback(async () => {
     if (demo) return;
@@ -87,6 +213,60 @@ export function BlingPageView({
     void loadStatus();
   }, [loadStatus]);
 
+  const displayEnts = useMemo(
+    () => mergeEntsFromApi(ents, status, demo),
+    [ents, status, demo],
+  );
+  const syncLogs = useMemo(
+    () => logsFromApi(status?.logs ?? [], demo),
+    [status?.logs, demo],
+  );
+
+  const conectado = demo || (status?.conectadas ?? 0) > 0;
+  const primeira = status?.conexoes?.find((c) => c.status === "conectado") ??
+    status?.conexoes?.[0];
+  const contaNome =
+    primeira?.conta_nome ??
+    (demo ? "Nexus Compras Distribuição" : "—");
+  const totalRegistros = displayEnts
+    .filter((e) => e.on)
+    .reduce((s, e) => s + e.registros, 0);
+
+  const toggleEnt = (id: string) => {
+    setEnts((prev) => {
+      const next = prev.map((e) =>
+        e.id === id ? { ...e, on: !e.on } : e,
+      );
+      nxStore.set(
+        "bling_sync",
+        next.reduce<Record<string, boolean>>((a, e) => {
+          a[e.id] = e.on;
+          return a;
+        }, {}),
+      );
+      return next;
+    });
+  };
+
+  const toggleWh = (k: WebhookKey) => {
+    setWebhooks((p) => {
+      const next = { ...p, [k]: !p[k] };
+      nxStore.set("bling_webhooks", next);
+      return next;
+    });
+  };
+
+  const toggleAcao = (wk: string, ak: keyof WhAcoes[string]) => {
+    setWhAcoes((p) => {
+      const next = {
+        ...p,
+        [wk]: { ...p[wk], [ak]: !p[wk]?.[ak] },
+      };
+      nxStore.set("bling_wh_acoes", next);
+      return next;
+    });
+  };
+
   const runSync = async () => {
     if (demo) {
       onSaved?.("Modo demo — configure Supabase e Bling");
@@ -94,7 +274,7 @@ export function BlingPageView({
     }
     setSyncing(true);
     try {
-      const entidades = ENTIDADES.filter((e) => entsOn[e.id]).map((e) => e.id);
+      const entidades = displayEnts.filter((e) => e.on).map((e) => e.id);
       const res = await fetch("/api/bling/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -113,68 +293,117 @@ export function BlingPageView({
     }
   };
 
-  const conectado = (status?.conectadas ?? 0) > 0;
-  const primeira = status?.conexoes?.[0];
+  const reconnect = () => {
+    if (demo) {
+      onSaved?.("Modo demo — use Integrações para simular conexão");
+      return;
+    }
+    const filialId = primeira?.filial_id;
+    if (!filialId) {
+      toast.error("Nenhuma filial conectada — use Integrações para autorizar");
+      return;
+    }
+    window.location.href = `/api/bling/authorize?org_id=${encodeURIComponent(activeOrg.orgId)}&filial_id=${encodeURIComponent(filialId)}`;
+  };
+
+  const saveCred = () => {
+    nxStore.set("bling_cred", cred);
+    onSaved?.("Credenciais salvas");
+    toast.success("Credenciais salvas localmente");
+  };
+
+  const saveWebhooks = () => {
+    nxStore.set("bling_webhooks", webhooks);
+    nxStore.set("bling_wh_acoes", whAcoes);
+    onSaved?.("Webhooks salvos");
+    toast.success("Webhooks salvos");
+  };
 
   return (
-    <div className={embedded ? "nx-set-content" : "nx-bling"}>
-      {embedded && onBack && (
-        <button
-          type="button"
-          className="nx-set-back"
-          style={{ width: "auto", marginBottom: 12 }}
-          onClick={onBack}
+    <div className={`nx-bling${embedded ? " is-embedded" : ""}`}>
+      <div className="nx-rel-banner">
+        {onBack && (
+          <button
+            type="button"
+            className="nx-back-btn"
+            onClick={onBack}
+            title="Voltar para Integrações"
+          >
+            <ArrowLeft className="size-[18px]" />
+          </button>
+        )}
+        <div className="nx-rel-banner-icon">
+          <Box className="size-5" />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h1 className="nx-rel-banner-title">Bling ERP v3</h1>
+          <p className="nx-rel-banner-sub">
+            {demo
+              ? "Modo demonstração — dados fictícios"
+              : "Integração OAuth 2.0 · sincronização automática a cada 30 minutos"}
+          </p>
+        </div>
+        <div
+          className="nx-rel-banner-actions"
+          style={{ marginLeft: "auto", marginRight: -8 }}
         >
-          <ArrowLeft size={15} /> Voltar às integrações
-        </button>
-      )}
-      <RelBanner
-        icon={Plug}
-        title="Bling ERP v3"
-        subtitle={
-          demo
-            ? "Modo demonstração — dados fictícios"
-            : status?.bling_configured
-              ? "Integração OAuth 2.0 · sincronização sob demanda"
-              : "Configure BLING_CLIENT_ID e BLING_CLIENT_SECRET no servidor"
-        }
-        actions={
           <button
             type="button"
             className="btn btn-secondary"
-            disabled={syncing || demo}
+            disabled={syncing}
             onClick={() => void runSync()}
           >
-            <RefreshCw className={`size-3.5${syncing ? " animate-spin" : ""}`} />{" "}
+            <RefreshCw
+              className={`size-3.5${syncing ? " animate-spin" : ""}`}
+              style={{ marginRight: 4 }}
+            />
             {syncing ? "Sincronizando…" : "Sincronizar agora"}
           </button>
-        }
-      />
+        </div>
+      </div>
+
       <div className="card nx-bling-conn">
         <div className="nx-bling-conn-left">
-          <div className={`nx-bling-statusdot${conectado ? " on" : ""}`} />
+          <div className={`nx-bling-statusdot ${conectado ? "on" : "off"}`} />
           <div>
             <div className="nx-bling-conn-title">
-              {conectado ? "Conectado ao Bling" : "Nenhuma conta conectada"}
+              {conectado ? "Conectado ao Bling" : "Desconectado"}
             </div>
             <div className="nx-bling-conn-sub">
-              {primeira?.conta_nome
-                ? `Conta: ${primeira.conta_nome}`
-                : "Conecte uma filial em Integrações"}
+              Conta: <strong>{contaNome}</strong>
+              {conectado && " · OAuth válido"}
             </div>
           </div>
         </div>
         <div className="nx-bling-conn-meta">
           <div>
-            <span className="l">Última sync</span>
-            <span className="v ok">{formatRelative(primeira?.last_sync_at ?? null)}</span>
+            <span className="l">Token de acesso</span>
+            <span className="v">
+              {formatTokenRenewal(primeira?.expires_at ?? null)}
+            </span>
           </div>
           <div>
-            <span className="l">Contas</span>
-            <span className="v">{status?.conectadas ?? 0} ativas</span>
+            <span className="l">Refresh token</span>
+            <span className="v">
+              {demo
+                ? "válido até 18/07/2026"
+                : conectado
+                  ? "válido"
+                  : "—"}
+            </span>
+          </div>
+          <div>
+            <span className="l">Última sincronização</span>
+            <span className="v ok">
+              {formatRelative(primeira?.last_sync_at ?? null)}
+            </span>
           </div>
         </div>
+        <button type="button" className="btn btn-secondary" onClick={reconnect}>
+          <Unplug className="size-3.5" /> Reconectar
+        </button>
       </div>
+
       <div className="nx-bling-tabs">
         {TABS.map((t) => {
           const Icon = t.icon;
@@ -190,73 +419,534 @@ export function BlingPageView({
           );
         })}
       </div>
+
       {tab === "visao" && (
-        <div className="nx-bling-kpis">
-          {[
-            { l: "Produtos sincronizados", v: String(status?.totais.produtos ?? 0) },
-            { l: "Fornecedores", v: String(status?.totais.fornecedores ?? 0) },
-            { l: "Linhas de estoque", v: String(status?.totais.estoque_linhas ?? 0) },
-            {
-              l: "Status API",
-              v: status?.bling_configured ? "Configurada" : "Pendente",
-            },
-          ].map((k) => (
-            <div key={k.l} className="card p-4">
-              <div className="type-caption">{k.l}</div>
-              <div className="type-h2 m-0">{k.v}</div>
+        <>
+          <div className="nx-bling-kpis">
+            <div className="card kpi">
+              <div className="kpi-label">Entidades sincronizando</div>
+              <div className="kpi-value">
+                {displayEnts.filter((e) => e.on).length}
+                <span
+                  style={{
+                    fontSize: 14,
+                    color: "hsl(var(--muted-foreground))",
+                  }}
+                >
+                  /{displayEnts.length}
+                </span>
+              </div>
             </div>
-          ))}
+            <div className="card kpi">
+              <div className="kpi-label">Registros sincronizados</div>
+              <div className="kpi-value">
+                {totalRegistros.toLocaleString("pt-BR")}
+              </div>
+            </div>
+            <div className="card kpi">
+              <div className="kpi-label">Rate limit Bling</div>
+              <div className="kpi-value">
+                0,7
+                <span
+                  style={{
+                    fontSize: 13,
+                    color: "hsl(var(--muted-foreground))",
+                  }}
+                >
+                  {" "}
+                  req/s
+                </span>
+              </div>
+            </div>
+            <div className="card kpi">
+              <div className="kpi-label">Próxima sync (cron)</div>
+              <div className="kpi-value" style={{ fontSize: 18 }}>
+                em 24 min
+              </div>
+            </div>
+          </div>
+
+          <div className="nx-bling-grid">
+            <div className="card">
+              <div className="nx-cardhead">
+                <h2 className="type-h2" style={{ margin: 0 }}>
+                  Status das Entidades
+                </h2>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setTab("sync")}
+                >
+                  Gerenciar regras →
+                </button>
+              </div>
+              <table className="tbl tbl-cc">
+                <thead>
+                  <tr>
+                    <th>Entidade</th>
+                    <th style={{ width: 130 }}>Direção</th>
+                    <th className="num" style={{ width: 90 }}>
+                      Registros
+                    </th>
+                    <th style={{ width: 90 }}>Última</th>
+                    <th style={{ width: 90 }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayEnts
+                    .filter((e) => e.on)
+                    .map((e) => {
+                      const st = STATUS_MAP[e.status];
+                      const Icon = e.icon;
+                      return (
+                        <tr key={e.id}>
+                          <td>
+                            <span className="nx-bling-ent">
+                              <Icon className="size-3.5" />{" "}
+                              <strong>{e.label}</strong>
+                            </span>
+                          </td>
+                          <td style={{ color: "hsl(var(--muted-foreground))" }}>
+                            {e.dir}
+                          </td>
+                          <td className="num mono">
+                            {e.registros.toLocaleString("pt-BR")}
+                          </td>
+                          <td style={{ color: "hsl(var(--muted-foreground))" }}>
+                            {e.last}
+                          </td>
+                          <td>
+                            <span className={`pill pill-${st.c}`}>{st.l}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="nx-bling-side">
+              <div className="card" style={{ padding: 16 }}>
+                <h3 className="type-h3" style={{ margin: "0 0 10px" }}>
+                  <Gauge
+                    className="size-3.5"
+                    style={{ verticalAlign: -2, marginRight: 4 }}
+                  />
+                  Rate Limit
+                </h3>
+                <div className="nx-bling-rate">
+                  <div className="nx-bling-rate-bar">
+                    <div style={{ width: "62%" }} />
+                  </div>
+                  <div className="type-caption">
+                    0,43 / 0,7 req/s · 62% da janela
+                  </div>
+                </div>
+                <p className="type-caption" style={{ marginTop: 10 }}>
+                  Fila no cliente protege contra <code>429</code>. Proxy central:{" "}
+                  <code>bling-proxy</code>.
+                </p>
+              </div>
+
+              <div className="card" style={{ padding: 16 }}>
+                <h3 className="type-h3" style={{ margin: "0 0 4px" }}>
+                  <Webhook
+                    className="size-3.5"
+                    style={{ verticalAlign: -2, marginRight: 4 }}
+                  />
+                  Webhooks Ativos
+                </h3>
+                <p className="type-caption" style={{ margin: "0 0 10px" }}>
+                  {WEBHOOK_DEFS.filter((w) => webhooks[w.k]).length} de{" "}
+                  {WEBHOOK_DEFS.length} eventos
+                </p>
+                {WEBHOOK_DEFS.map((w) => {
+                  const Icon = w.icon;
+                  return (
+                    <div key={w.k} className="nx-bling-wh">
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 7,
+                        }}
+                      >
+                        <Icon
+                          className="size-3.5"
+                          style={{ color: "hsl(var(--muted-foreground))" }}
+                        />{" "}
+                        {w.l}
+                      </span>
+                      {webhooks[w.k] ? (
+                        <span className="pill pill-ok">Ativo</span>
+                      ) : (
+                        <span className="pill pill-sem-giro">Inativo</span>
+                      )}
+                    </div>
+                  );
+                })}
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ marginTop: 8, width: "100%" }}
+                  onClick={() => setTab("webhooks")}
+                >
+                  Configurar webhooks →
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {tab === "sync" && (
+        <>
+          <div className="card">
+            <div className="nx-cardhead">
+              <h2 className="type-h2" style={{ margin: 0 }}>
+                Regras de Sincronização
+              </h2>
+              <span className="type-caption">Por entidade · De/Para</span>
+            </div>
+            <table className="tbl tbl-cc">
+              <thead>
+                <tr>
+                  <th style={{ width: 44 }}>Sync</th>
+                  <th>Entidade</th>
+                  <th style={{ width: 130 }}>Direção</th>
+                  <th className="num" style={{ width: 90 }}>
+                    Registros
+                  </th>
+                  <th style={{ width: 90 }}>Última</th>
+                  <th style={{ width: 90 }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayEnts.map((e) => {
+                  const st = STATUS_MAP[e.status];
+                  const Icon = e.icon;
+                  return (
+                    <tr key={e.id}>
+                      <td>
+                        <label className="nx-switch">
+                          <input
+                            type="checkbox"
+                            checked={e.on}
+                            onChange={() => toggleEnt(e.id)}
+                          />
+                          <span className="track">
+                            <span className="thumb" />
+                          </span>
+                        </label>
+                      </td>
+                      <td>
+                        <span className="nx-bling-ent">
+                          <Icon className="size-3.5" />{" "}
+                          <strong>{e.label}</strong>
+                        </span>
+                      </td>
+                      <td style={{ color: "hsl(var(--muted-foreground))" }}>
+                        {e.dir}
+                      </td>
+                      <td className="num mono">
+                        {e.registros.toLocaleString("pt-BR")}
+                      </td>
+                      <td style={{ color: "hsl(var(--muted-foreground))" }}>
+                        {e.last}
+                      </td>
+                      <td>
+                        <span className={`pill pill-${st.c}`}>{st.l}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="card" style={{ marginTop: 14 }}>
+            <div className="nx-cardhead">
+              <h2 className="type-h2" style={{ margin: 0 }}>
+                Histórico de Sincronização
+              </h2>
+              <button type="button" className="btn btn-secondary">
+                <FileDown className="size-3.5" /> Exportar logs
+              </button>
+            </div>
+            <table className="tbl tbl-cc">
+              <thead>
+                <tr>
+                  <th>Edge Function</th>
+                  <th style={{ width: 90 }}>Hora</th>
+                  <th style={{ width: 80 }}>Duração</th>
+                  <th className="num" style={{ width: 90 }}>
+                    Registros
+                  </th>
+                  <th style={{ width: 90 }}>Status</th>
+                  <th>Mensagem</th>
+                  <th style={{ width: 60, textAlign: "right" }}>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {syncLogs.map((l, i) => {
+                  const st = STATUS_MAP[l.status];
+                  return (
+                    <tr key={i}>
+                      <td className="mono" style={{ fontSize: 11 }}>
+                        {l.fn}
+                      </td>
+                      <td className="mono">{l.hora}</td>
+                      <td
+                        className="mono"
+                        style={{ color: "hsl(var(--muted-foreground))" }}
+                      >
+                        {l.dur}
+                      </td>
+                      <td className="num mono">{l.reg}</td>
+                      <td>
+                        <span className={`pill pill-${st.c}`}>{st.l}</span>
+                      </td>
+                      <td style={{ color: "hsl(var(--muted-foreground))" }}>
+                        {l.msg}
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        {l.status !== "sucesso" && (
+                          <button
+                            type="button"
+                            className="nx-rowbtn"
+                            title="Reprocessar"
+                            onClick={() => void runSync()}
+                          >
+                            <RefreshCw className="size-3" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {tab === "credenciais" && (
+        <div className="card nx-bling-cred" style={{ maxWidth: 720 }}>
+          <div className="nx-set-cardhead">Credenciais do Aplicativo Bling</div>
+          <div className="nx-bling-cred-grid">
+            <div className="nx-set-field">
+              <label>Client ID</label>
+              <input
+                value={
+                  status?.bling_configured && !demo
+                    ? cred.clientId || "••••••••••••••••••••"
+                    : cred.clientId
+                }
+                readOnly={status?.bling_configured && !demo}
+                onChange={(e) =>
+                  setCred((c) => ({ ...c, clientId: e.target.value }))
+                }
+              />
+            </div>
+            <div className="nx-set-field">
+              <label>Client Secret</label>
+              <div className="nx-bling-secret">
+                <input
+                  type={showSecret ? "text" : "password"}
+                  value={
+                    status?.bling_configured && !demo
+                      ? cred.clientSecret || "••••••••••••••••••••"
+                      : cred.clientSecret
+                  }
+                  readOnly={status?.bling_configured && !demo}
+                  onChange={(e) =>
+                    setCred((c) => ({ ...c, clientSecret: e.target.value }))
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSecret((s) => !s)}
+                  title={showSecret ? "Ocultar" : "Mostrar"}
+                >
+                  {showSecret ? (
+                    <EyeOff className="size-3.5" />
+                  ) : (
+                    <Eye className="size-3.5" />
+                  )}
+                </button>
+              </div>
+            </div>
+            <div className="nx-set-field full">
+              <label>URL de Redirecionamento (OAuth callback)</label>
+              <div className="nx-bling-secret">
+                <input readOnly value={redirectUri} />
+                <button
+                  type="button"
+                  title="Copiar"
+                  onClick={() => copyText(redirectUri, onSaved)}
+                >
+                  <Copy className="size-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="nx-bling-cred-foot">
+            <span className="type-caption">
+              <Info
+                className="size-3"
+                style={{ verticalAlign: -2, marginRight: 4 }}
+              />
+              Cadastre esta URL no painel do Bling em{" "}
+              <code>Aplicativos → OAuth</code>.
+            </span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" className="btn btn-ghost">
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary-blue"
+                onClick={saveCred}
+              >
+                <Save className="size-3.5" /> SALVAR CREDENCIAIS
+              </button>
+            </div>
+          </div>
         </div>
       )}
-      {tab === "sync" && (
-        <div className="card mt-3.5">
-          <table className="tbl">
+
+      {tab === "webhooks" && (
+        <div className="card">
+          <div className="nx-cardhead">
+            <div>
+              <h2 className="type-h2" style={{ margin: 0 }}>
+                Webhooks
+              </h2>
+              <p className="type-caption" style={{ margin: "2px 0 0" }}>
+                Eventos que o Bling notifica em tempo real · cole cada URL no
+                painel do Bling
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary-blue"
+              onClick={saveWebhooks}
+            >
+              <Save className="size-3.5" /> SALVAR
+            </button>
+          </div>
+          <table className="tbl tbl-cc">
             <thead>
               <tr>
-                <th>Entidade</th>
-                <th>Ativo</th>
+                <th style={{ width: 44 }}>Ativo</th>
+                <th style={{ width: 190 }}>Evento</th>
+                <th>URL de Callback</th>
+                <th style={{ width: 250 }}>Ações Notificadas</th>
+                <th style={{ width: 80 }}>Status</th>
               </tr>
             </thead>
             <tbody>
-              {ENTIDADES.map((e) => (
-                <tr key={e.id}>
-                  <td>{e.label}</td>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={entsOn[e.id] ?? true}
-                      onChange={() =>
-                        setEntsOn((prev) => ({ ...prev, [e.id]: !prev[e.id] }))
-                      }
-                    />
-                  </td>
-                </tr>
-              ))}
+              {WEBHOOK_DEFS.map((w) => {
+                const Icon = w.icon;
+                const url = `${webhookBase}/${w.slug}`;
+                return (
+                  <tr key={w.k}>
+                    <td>
+                      <label className="nx-switch">
+                        <input
+                          type="checkbox"
+                          checked={!!webhooks[w.k]}
+                          onChange={() => toggleWh(w.k)}
+                        />
+                        <span className="track">
+                          <span className="thumb" />
+                        </span>
+                      </label>
+                    </td>
+                    <td>
+                      <span className="nx-bling-ent">
+                        <Icon className="size-3.5" /> <strong>{w.l}</strong>
+                      </span>
+                    </td>
+                    <td>
+                      {webhooks[w.k] ? (
+                        <div className="nx-bling-whurl">
+                          <input readOnly value={url} />
+                          <button
+                            type="button"
+                            title="Copiar URL"
+                            onClick={() => copyText(url, onSaved)}
+                          >
+                            <Copy className="size-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span style={{ color: "hsl(var(--muted-foreground))" }}>
+                          —
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {webhooks[w.k] ? (
+                        <div className="nx-bling-acoes">
+                          {(
+                            [
+                              { k: "criacao", l: "Criação" },
+                              { k: "atualizacao", l: "Atualização" },
+                              { k: "exclusao", l: "Exclusão" },
+                            ] as const
+                          ).map((a) => (
+                            <label key={a.k} className="nx-bling-check">
+                              <input
+                                type="checkbox"
+                                checked={whAcoes[w.k]?.[a.k] ?? false}
+                                onChange={() => toggleAcao(w.k, a.k)}
+                              />
+                              <span className="box">
+                                <Check className="size-2.5" />
+                              </span>
+                              {a.l}
+                            </label>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={{ color: "hsl(var(--muted-foreground))" }}>
+                          —
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {webhooks[w.k] ? (
+                        <span className="pill pill-ok">Ativo</span>
+                      ) : (
+                        <span className="pill pill-sem-giro">Inativo</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
-        </div>
-      )}
-      {tab === "credenciais" && (
-        <div className="card nx-bling-cred p-4">
-          <p className="type-caption m-0">
-            Credenciais OAuth ficam em variáveis de ambiente do servidor (Vercel).
-            Redirect URI:{" "}
-            <code className="mono">
-              {typeof window !== "undefined"
-                ? `${window.location.origin}/api/bling/callback`
-                : "/api/bling/callback"}
-            </code>
-          </p>
-        </div>
-      )}
-      {tab === "webhooks" && (
-        <div className="card p-4">
-          <p className="type-caption m-0">
-            Webhooks do Bling serão configurados em versão futura. Use
-            sincronização manual ou agendada por enquanto.
-          </p>
+          <div className="nx-bling-cred-foot">
+            <span className="type-caption">
+              <Info
+                className="size-3"
+                style={{ verticalAlign: -2, marginRight: 4 }}
+              />
+              Idempotência por índice único{" "}
+              <code>(empresa_id, bling_id)</code>.
+            </span>
+          </div>
         </div>
       )}
     </div>
   );
+}
+
+function defaultCred() {
+  return {
+    clientId: "a1b2c3d4e5f6g7h8i9j0",
+    clientSecret: "sk_live_8x7w6v5u4t3s2r1q0p",
+    redirect: "",
+  };
 }

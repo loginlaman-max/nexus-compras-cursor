@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
 import { getBlingCredentials } from "@/lib/bling/config";
 import { decodeState, exchangeCode } from "@/lib/bling/oauth";
+import { blingConfigRedirect } from "@/lib/bling/redirect";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(request: Request) {
@@ -9,33 +9,22 @@ export async function GET(request: Request) {
   const stateRaw = searchParams.get("state");
   const error = searchParams.get("error");
 
-  const base = new URL("/configuracoes", request.url);
-  base.searchParams.set("tab", "integracoes");
-
   if (error) {
-    base.searchParams.set("bling", "erro");
-    base.searchParams.set("msg", error);
-    return NextResponse.redirect(base);
+    return blingConfigRedirect(request, "erro", error);
   }
 
   if (!code || !stateRaw) {
-    base.searchParams.set("bling", "erro");
-    base.searchParams.set("msg", "callback_incompleto");
-    return NextResponse.redirect(base);
+    return blingConfigRedirect(request, "erro", "callback_incompleto");
   }
 
   const state = decodeState(stateRaw);
   if (!state) {
-    base.searchParams.set("bling", "erro");
-    base.searchParams.set("msg", "state_invalido");
-    return NextResponse.redirect(base);
+    return blingConfigRedirect(request, "erro", "state_invalido");
   }
 
   const creds = getBlingCredentials();
   if (!creds) {
-    base.searchParams.set("bling", "erro");
-    base.searchParams.set("msg", "bling_nao_configurado");
-    return NextResponse.redirect(base);
+    return blingConfigRedirect(request, "erro", "bling_nao_configurado");
   }
 
   try {
@@ -97,12 +86,9 @@ export async function GET(request: Request) {
       }).catch(() => {});
     }
 
-    base.searchParams.set("bling", "ok");
-    return NextResponse.redirect(base);
+    return blingConfigRedirect(request, "ok");
   } catch (e) {
     const msg = e instanceof Error ? e.message : "erro_token";
-    base.searchParams.set("bling", "erro");
-    base.searchParams.set("msg", msg.slice(0, 120));
-    return NextResponse.redirect(base);
+    return blingConfigRedirect(request, "erro", msg.slice(0, 120));
   }
 }

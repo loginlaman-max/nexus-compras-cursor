@@ -25,6 +25,7 @@ import { useOrg } from "@/components/providers/org-provider";
 import type { Filial } from "@/lib/mock";
 import { isDemoMode } from "@/lib/supabase/env";
 import { nxStore } from "@/lib/store/nx-store";
+import { toast } from "sonner";
 import { SetDialog, SetHeader } from "./config-shared";
 
 interface BlingInstState {
@@ -97,9 +98,10 @@ export function SetIntegracoes({
 }) {
   const { activeOrg } = useOrg();
   const demo = isDemoMode();
-  const { filiais, loading: filiaisLoading } = useFiliaisIntegracao();
+  const { filiais, loading: filiaisLoading, reload } = useFiliaisIntegracao();
   const [tab, setTab] = useState<"catalogo" | "instalacoes">("catalogo");
   const [connect, setConnect] = useState<{ filialId: string } | null>(null);
+  const [saving, setSaving] = useState(false);
   const conectadas = filiais.filter(
     (f) => f.bling?.status === "conectado",
   ).length;
@@ -119,36 +121,93 @@ export function SetIntegracoes({
     return f.bling?.status === "desativado" ? "desativado" : (f.bling?.status ?? "erro");
   };
 
-  const confirmAction = () => {
+  const confirmAction = async () => {
     if (!action || action.motivo.trim().length < 5) return;
-    const next = {
-      ...inst,
-      [action.f.id]: {
-        status:
-          action.tipo === "excluir"
-            ? ("excluido" as const)
-            : ("desativado" as const),
-        motivo: action.motivo.trim(),
-        quando: new Date().toLocaleString("pt-BR"),
-        por: "Equipe TI · Admin Master",
-      },
-    };
-    setInst(next);
-    nxStore.set("bling_inst_state", next);
-    onSaved?.(
-      (action.tipo === "excluir" ? "Conexão excluída" : "Conexão desativada") +
-        " · motivo registrado",
-    );
-    setAction(null);
+
+    const por = `${activeOrg.papel} · ${activeOrg.org.nome}`;
+    const quando = new Date().toLocaleString("pt-BR");
+    const tipo = action.tipo;
+
+    setSaving(true);
+    try {
+      if (!demo) {
+        const res = await fetch("/api/bling/conexao", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            org_id: activeOrg.orgId,
+            filial_id: action.f.id,
+            acao: tipo,
+            motivo: action.motivo.trim(),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Falha na operação");
+        await reload();
+      }
+
+      const next = { ...inst };
+      if (tipo === "excluir") {
+        next[action.f.id] = {
+          status: "excluido",
+          motivo: action.motivo.trim(),
+          quando,
+          por,
+        };
+      } else {
+        next[action.f.id] = {
+          status: "desativado",
+          motivo: action.motivo.trim(),
+          quando,
+          por,
+        };
+      }
+      setInst(next);
+      nxStore.set("bling_inst_state", next);
+      onSaved?.(
+        (tipo === "excluir" ? "Conexão excluída" : "Conexão desativada") +
+          " · motivo registrado",
+      );
+      toast.success(
+        tipo === "excluir" ? "Conexão excluída" : "Conexão desativada",
+      );
+      setAction(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao processar");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const reativar = (f: Filial) => {
-    const next = { ...inst };
-    delete next[f.id];
-    setInst(next);
-    nxStore.set("bling_inst_state", next);
-    setMenu(null);
-    onSaved?.("Conexão reativada");
+  const reativar = async (f: Filial) => {
+    setSaving(true);
+    try {
+      if (!demo && f.bling) {
+        const res = await fetch("/api/bling/conexao", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            org_id: activeOrg.orgId,
+            filial_id: f.id,
+            acao: "reativar",
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Falha ao reativar");
+        await reload();
+      }
+      const next = { ...inst };
+      delete next[f.id];
+      setInst(next);
+      nxStore.set("bling_inst_state", next);
+      setMenu(null);
+      onSaved?.("Conexão reativada");
+      toast.success("Conexão reativada — autorize novamente no Bling se necessário");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao reativar");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const blingCard = (f: Filial) => {
@@ -293,6 +352,7 @@ export function SetIntegracoes({
     return e === "conectado" || e === "erro";
   });
   const inativas = filiais.filter((f) => estadoDe(f) === "desativado");
+  const excluidas = filiais.filter((f) => estadoDe(f) === "excluido");
 
   return (
     <div className="nx-set-content">
@@ -367,6 +427,21 @@ export function SetIntegracoes({
                 style={{ marginTop: 10, marginBottom: 18 }}
               >
                 {inativas.map(blingCard)}
+              </div>
+            </details>
+          )}
+
+          {excluidas.length > 0 && (
+            <details className="nx-set-inactive">
+              <summary>
+                <Trash2 size={14} /> Excluídos{" "}
+                <span className="nx-set-tabcount">{excluidas.length}</span>
+              </summary>
+              <div
+                className="nx-set-intgrid"
+                style={{ marginTop: 10, marginBottom: 18 }}
+              >
+                {excluidas.map(blingCard)}
               </div>
             </details>
           )}
@@ -495,6 +570,7 @@ export function SetIntegracoes({
               : null
           }
           saveLabel="Autorizar no Bling →"
+          saveDisabled={!connect.filialId}
         >
           <p
             style={{
@@ -543,11 +619,15 @@ export function SetIntegracoes({
               ? "Excluir conexão Bling"
               : "Desativar conexão Bling"
           }
-          onClose={() => setAction(null)}
-          onSave={confirmAction}
-          saveDisabled={action.motivo.trim().length < 5}
+          onClose={() => !saving && setAction(null)}
+          onSave={() => void confirmAction()}
+          saveDisabled={action.motivo.trim().length < 5 || saving}
           saveLabel={
-            action.tipo === "excluir" ? "Excluir conexão" : "Desativar"
+            saving
+              ? "Processando…"
+              : action.tipo === "excluir"
+                ? "Excluir conexão"
+                : "Desativar"
           }
           danger={action.tipo === "excluir"}
         >

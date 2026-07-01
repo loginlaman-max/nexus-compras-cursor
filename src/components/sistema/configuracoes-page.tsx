@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   BadgeCheck,
@@ -21,6 +22,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useSaveToast } from "@/hooks/use-save-toast";
+import { BLING_CALLBACK_MESSAGES } from "@/lib/bling/redirect";
 import { BlingPageView } from "@/components/sistema/bling-page";
 import {
   SetCondComerciais,
@@ -99,6 +101,33 @@ export function ConfiguracoesPageView() {
   const [manage, setManage] = useState<"bling" | null>(null);
   const toast = useSaveToast();
   const onSaved = toast.show;
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    const bling = searchParams.get("bling");
+    if (!tab && !bling) return;
+
+    if (tab === "integracoes" || bling) {
+      setSec("integracoes");
+      setManage(null);
+    }
+
+    if (!bling) return;
+
+    const msgKey = searchParams.get("msg");
+    if (bling === "ok") {
+      onSaved("Conta Bling conectada com sucesso!");
+    } else if (bling === "erro") {
+      onSaved(
+        (msgKey && BLING_CALLBACK_MESSAGES[msgKey]) ||
+          `Erro na integração Bling${msgKey ? `: ${msgKey}` : ""}`,
+      );
+    }
+
+    router.replace("/configuracoes");
+  }, [searchParams, router, onSaved]);
 
   const allItems = SET_NAV.flatMap((g) => g.items);
   const cur = allItems.find((i) => i.id === sec);
