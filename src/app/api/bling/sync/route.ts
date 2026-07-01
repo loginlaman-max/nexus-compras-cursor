@@ -21,6 +21,7 @@ export async function POST(request: Request) {
     org_id?: string;
     filial_id?: string;
     entidades?: string[];
+    incremental?: boolean;
   };
   const orgId = body.org_id;
   if (!orgId) {
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          "Nenhuma entidade suportada selecionada. Ative contatos, pedidos, produtos, estoque, notas ou vendas.",
+          "Nenhuma entidade suportada selecionada. Ative contatos, pedidos, produtos, depósitos, estoque, notas ou vendas.",
       },
       { status: 400 },
     );
@@ -47,6 +48,8 @@ export async function POST(request: Request) {
     const outcome = await runBlingSync(orgId, {
       filialId: body.filial_id ?? null,
       entidades: body.entidades,
+      incremental: body.incremental ?? false,
+      trigger: "manual",
     });
 
     if (!outcome.ok && !outcome.partial) {

@@ -166,7 +166,11 @@ export function BlingPageView({
   const webhookBase =
     typeof window !== "undefined"
       ? `${window.location.origin}/api/webhooks/bling`
-      : "https://app.nexuscompras.com.br/webhooks/bling";
+      : "https://nexus-compras-cursor.vercel.app/api/webhooks/bling";
+
+  const webhookQuery = activeOrg.orgId
+    ? `?org_id=${encodeURIComponent(activeOrg.orgId)}`
+    : "";
 
   const loadStatus = useCallback(async () => {
     if (demo) return;
@@ -307,7 +311,7 @@ export function BlingPageView({
       );
       if (entidades.length === 0) {
         toast.error(
-          "Ative ao menos uma entidade: contatos, pedidos, produtos, estoque, notas ou vendas.",
+          "Ative ao menos uma entidade: contatos, pedidos, produtos, depósitos, estoque, notas ou vendas.",
         );
         return;
       }
@@ -1191,7 +1195,7 @@ export function BlingPageView({
             <tbody>
               {WEBHOOK_DEFS.map((w) => {
                 const Icon = w.icon;
-                const url = `${webhookBase}/${w.slug}`;
+                const url = `${webhookBase}/${w.slug}${webhookQuery}`;
                 return (
                   <tr key={w.k}>
                     <td>

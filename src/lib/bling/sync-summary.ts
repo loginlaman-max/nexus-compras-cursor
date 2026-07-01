@@ -1,8 +1,9 @@
-/** Ordem fixa: fornecedores → pedidos → produtos → estoque → NF-e → vendas. */
+/** Ordem fixa: fornecedores → pedidos → produtos → depósitos → estoque → NF-e → vendas. */
 export const SYNC_ENTITY_ORDER = [
   "contatos",
   "pedidos",
   "produtos",
+  "depositos",
   "estoque",
   "notas",
   "vendas",
@@ -14,7 +15,18 @@ export type SyncEntityId = (typeof SYNC_ENTITY_ORDER)[number];
 export const INITIAL_SYNC_ENTITIES: SyncEntityId[] = [
   "contatos",
   "produtos",
+  "depositos",
   "estoque",
+];
+
+/** Entidades do cron automático (incremental). */
+export const CRON_SYNC_ENTITIES: SyncEntityId[] = [
+  "contatos",
+  "produtos",
+  "depositos",
+  "estoque",
+  "notas",
+  "vendas",
 ];
 
 export type SyncSummary = {
@@ -22,9 +34,11 @@ export type SyncSummary = {
     contatos: number;
     pedidos: number;
     produtos: number;
+    depositos: number;
     estoque: number;
     notas: number;
     vendas: number;
+    custo_atualizado?: number;
   };
   totals: {
     produtos: number;
@@ -32,6 +46,7 @@ export type SyncSummary = {
     estoque_linhas: number;
     pedidos: number;
     notas: number;
+    depositos: number;
   };
 };
 
@@ -47,6 +62,7 @@ export function sumImported(
     contatos: 0,
     pedidos: 0,
     produtos: 0,
+    depositos: 0,
     estoque: 0,
     notas: 0,
     vendas: 0,
@@ -55,6 +71,7 @@ export function sumImported(
     sum.contatos += filialResults.contatos ?? 0;
     sum.pedidos += filialResults.pedidos ?? 0;
     sum.produtos += filialResults.produtos ?? 0;
+    sum.depositos += filialResults.depositos ?? 0;
     sum.estoque += filialResults.estoque ?? 0;
     sum.notas += filialResults.notas ?? 0;
     sum.vendas += filialResults.vendas ?? 0;
@@ -82,6 +99,11 @@ export function buildSyncSummaryMessage(
       `${summary.imported.produtos.toLocaleString("pt-BR")} produto(s)`,
     );
   }
+  if (summary.imported.depositos > 0) {
+    parts.push(
+      `${summary.imported.depositos.toLocaleString("pt-BR")} depósito(s)`,
+    );
+  }
   if (summary.imported.estoque > 0) {
     parts.push(
       `${summary.imported.estoque.toLocaleString("pt-BR")} saldo(s) de estoque`,
@@ -97,6 +119,11 @@ export function buildSyncSummaryMessage(
       `${summary.imported.vendas.toLocaleString("pt-BR")} linha(s) de vendas`,
     );
   }
+  if (summary.imported.custo_atualizado && summary.imported.custo_atualizado > 0) {
+    parts.push(
+      `${summary.imported.custo_atualizado.toLocaleString("pt-BR")} custo(s) via NF-e`,
+    );
+  }
 
   const imported =
     parts.length > 0
@@ -106,6 +133,9 @@ export function buildSyncSummaryMessage(
   const catalog = [
     `${summary.totals.produtos.toLocaleString("pt-BR")} produtos`,
     `${summary.totals.fornecedores.toLocaleString("pt-BR")} fornecedores`,
+    summary.totals.depositos > 0
+      ? `${summary.totals.depositos.toLocaleString("pt-BR")} depósitos`
+      : null,
     summary.totals.pedidos > 0
       ? `${summary.totals.pedidos.toLocaleString("pt-BR")} pedidos`
       : null,

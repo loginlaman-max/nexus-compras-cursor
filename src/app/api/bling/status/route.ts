@@ -45,6 +45,7 @@ export async function GET(request: Request) {
     nfeCount,
     pedCount,
     vendasCount,
+    depCount,
     filiaisCount,
   ] = await Promise.all([
     supabase
@@ -84,6 +85,10 @@ export async function GET(request: Request) {
       .select("*", { count: "exact", head: true })
       .eq("org_id", orgId),
     supabase
+      .from("bling_depositos")
+      .select("*", { count: "exact", head: true })
+      .eq("org_id", orgId),
+    supabase
       .from("filiais")
       .select("*", { count: "exact", head: true })
       .eq("org_id", orgId),
@@ -103,7 +108,7 @@ export async function GET(request: Request) {
     estoque: estCount.count ?? 0,
     notas: nfeCount.count ?? 0,
     vendas: vendasCount.count ?? 0,
-    depositos: filiaisCount.count ?? 0,
+    depositos: depCount.count ?? 0,
     pedidos: pedCount.count ?? 0,
   };
 
@@ -150,8 +155,9 @@ export async function GET(request: Request) {
       estoque_linhas: counts.estoque,
       notas: counts.notas,
       pedidos: counts.pedidos,
+      depositos: counts.depositos,
       vendas_linhas: counts.vendas,
-      filiais: counts.depositos,
+      filiais: filiaisCount.count ?? 0,
     },
     conectadas,
   });

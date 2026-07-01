@@ -6,12 +6,21 @@ import {
   type BlingConn,
   type SyncEntityId,
 } from "./api-client";
+import { applyCustoRealFromNfe } from "./custo-from-nfe";
 import { isFornecedorContato } from "./contato-helpers";
+import { isNfeEntrada } from "./nfe-helpers";
 import {
   needsProdutoEnrichment,
   resolveCodForn,
+  resolveImagemUrl,
   resolveProdutoCost,
 } from "./produto-helpers";
+import {
+  alteracaoDesde,
+  buildSyncContext,
+  type SyncContext,
+  type SyncRunOptions,
+} from "./sync-context";
 import { sumImported, type SyncSummary } from "./sync-summary";
 import type {
   BlingContato,
@@ -112,8 +121,15 @@ async function syncContatos(
   admin: Admin,
   conn: BlingConn,
   token: string,
+  ctx: SyncContext,
 ): Promise<number> {
-  const contatos = await fetchAllPages<BlingContato>(token, "/contatos");
+  const extra = ctx.incremental ? alteracaoDesde(ctx) : undefined;
+  const contatos = await fetchAllPages<BlingContato>(
+    token,
+    "/contatos",
+    100,
+    extra,
+  );
   let n = 0;
   for (const c of contatos) {
     if (!isFornecedorContato(c)) continue;
@@ -173,13 +189,13 @@ async function syncPedidos(
   admin: Admin,
   conn: BlingConn,
   token: string,
+  ctx: SyncContext,
 ): Promise<number> {
-  const desde = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
   const pedidos = await fetchAllPages<BlingPedidoCompra>(
     token,
     "/pedidos/compras",
     100,
-    { dataInicial: desde },
+    { dataInicial: ctx.since },
   );
   let n = 0;
 
@@ -246,8 +262,15 @@ async function syncProdutos(
   admin: Admin,
   conn: BlingConn,
   token: string,
+  ctx: SyncContext,
 ): Promise<number> {
-  const produtos = await fetchAllPages<BlingProduto>(token, "/produtos");
+  const extra = ctx.incremental ? alteracaoDesde(ctx) : undefined;
+  const produtos = await fetchAllPages<BlingProduto>(
+    token,
+    "/produtos",
+    100,
+    extra,
+  );
   let n = 0;
   for (const p of produtos) {
     const sku = String(p.codigo ?? p.id);
@@ -262,9 +285,11 @@ async function syncProdutos(
     const custoNovo = resolveProdutoCost(p, fornecedorRel);
     const codFornNovo = resolveCodForn(p, fornecedorRel);
 
+    const imagemUrl = resolveImagemUrl(p);
+
     const { data: existing } = await admin
       .from("produtos")
-      .select("id, custo_real, cod_forn")
+      .select("id, custo_real, cod_forn, imagem_url")
       .eq("org_id", conn.org_id)
       .eq("bling_id", String(p.id))
       .maybeSingle();
@@ -279,6 +304,7 @@ async function syncProdutos(
       ncm: p.ncm ?? null,
       preco_venda: p.preco ?? null,
       custo_real: custoNovo ?? existing?.custo_real ?? 0,
+      imagem_url: imagemUrl ?? existing?.imagem_url ?? null,
       fornecedor_id: fornecedorId,
       ativo: p.situacao !== "I",
       updated_at: new Date().toISOString(),
@@ -300,6 +326,67 @@ async function syncProdutos(
     n++;
   }
   return n;
+}
+
+async function syncDepositos(
+  admin: Admin,
+  conn: BlingConn,
+  token: string,
+): Promise<number> {
+  const depositos = await fetchAllPages<BlingDeposito>(token, "/depositos");
+  const ativos = depositos.filter((d) => d.situacao !== "I");
+  const padraoId = ativos[0]?.id
+    ? String(ativos[0].id)
+    : depositos[0]?.id
+      ? String(depositos[0].id)
+      : null;
+
+  let n = 0;
+  for (const d of depositos) {
+    const blingId = String(d.id);
+    await admin.from("bling_depositos").upsert(
+      {
+        org_id: conn.org_id,
+        bling_id: blingId,
+        descricao: d.descricao ?? null,
+        situacao: d.situacao ?? null,
+        padrao: padraoId !== null && blingId === padraoId,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "org_id,bling_id" },
+    );
+    n++;
+  }
+
+  if (padraoId) {
+    await admin
+      .from("filiais")
+      .update({ bling_deposito_id: padraoId })
+      .eq("org_id", conn.org_id)
+      .eq("id", conn.filial_id);
+  }
+
+  return n;
+}
+
+async function resolveDepositoIds(
+  admin: Admin,
+  conn: BlingConn,
+  token: string,
+): Promise<string[]> {
+  const { data: rows } = await admin
+    .from("bling_depositos")
+    .select("bling_id, situacao")
+    .eq("org_id", conn.org_id);
+
+  const fromDb = (rows ?? [])
+    .filter((r: { situacao?: string | null }) => r.situacao !== "I")
+    .map((r: { bling_id: string }) => String(r.bling_id));
+
+  if (fromDb.length) return fromDb;
+
+  const single = await resolveDepositoId(admin, conn, token);
+  return single ? [single] : [];
 }
 
 async function resolveDepositoId(
@@ -333,40 +420,43 @@ async function syncEstoque(
   admin: Admin,
   conn: BlingConn,
   token: string,
+  _ctx: SyncContext,
 ): Promise<number> {
-  const depositoId = await resolveDepositoId(admin, conn, token);
-  if (!depositoId) return 0;
+  const depositoIds = await resolveDepositoIds(admin, conn, token);
+  if (!depositoIds.length) return 0;
 
-  const json = await blingGet<{ data?: BlingSaldo[] }>(
-    token,
-    `/estoques/saldos/${depositoId}`,
-  );
-  const saldos = json.data ?? [];
   let n = 0;
-  for (const s of saldos) {
-    const blingProdId = s.produto?.id;
-    if (!blingProdId) continue;
-    const { data: prod } = await admin
-      .from("produtos")
-      .select("id")
-      .eq("org_id", conn.org_id)
-      .eq("bling_id", String(blingProdId))
-      .maybeSingle();
-    if (!prod?.id) continue;
-
-    const qtd = Number(s.saldoFisico ?? s.saldoVirtual ?? 0);
-    await admin.from("estoque_saldos").upsert(
-      {
-        org_id: conn.org_id,
-        filial_id: conn.filial_id,
-        produto_id: prod.id,
-        deposito_bling_id: depositoId,
-        quantidade: qtd,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "org_id,filial_id,produto_id,deposito_bling_id" },
+  for (const depositoId of depositoIds) {
+    const json = await blingGet<{ data?: BlingSaldo[] }>(
+      token,
+      `/estoques/saldos/${depositoId}`,
     );
-    n++;
+    const saldos = json.data ?? [];
+    for (const s of saldos) {
+      const blingProdId = s.produto?.id;
+      if (!blingProdId) continue;
+      const { data: prod } = await admin
+        .from("produtos")
+        .select("id")
+        .eq("org_id", conn.org_id)
+        .eq("bling_id", String(blingProdId))
+        .maybeSingle();
+      if (!prod?.id) continue;
+
+      const qtd = Number(s.saldoFisico ?? s.saldoVirtual ?? 0);
+      await admin.from("estoque_saldos").upsert(
+        {
+          org_id: conn.org_id,
+          filial_id: conn.filial_id,
+          produto_id: prod.id,
+          deposito_bling_id: depositoId,
+          quantidade: qtd,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "org_id,filial_id,produto_id,deposito_bling_id" },
+      );
+      n++;
+    }
   }
   return n;
 }
@@ -392,16 +482,18 @@ async function syncNotas(
   admin: Admin,
   conn: BlingConn,
   token: string,
+  ctx: SyncContext,
 ): Promise<number> {
-  const desde = new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10);
-  const hoje = new Date().toISOString().slice(0, 10);
   const notas = await fetchAllPages<BlingNfeResumo>(token, "/nfe", 100, {
-    dataEmissaoInicial: desde,
-    dataEmissaoFinal: hoje,
+    dataEmissaoInicial: ctx.since,
+    dataEmissaoFinal: ctx.until,
+    tipo: "0",
   });
   let n = 0;
 
   for (const resumo of notas) {
+    if (!isNfeEntrada(resumo)) continue;
+
     let detalhe: BlingNfeDetalhe = resumo;
     try {
       await new Promise((r) => setTimeout(r, ENRICH_DELAY_MS));
@@ -413,6 +505,8 @@ async function syncNotas(
     } catch {
       /* usa resumo da listagem */
     }
+
+    if (!isNfeEntrada(detalhe)) continue;
 
     const blingContatoId = detalhe.contato?.id;
     const fornecedorId = await resolveFornecedorId(
@@ -511,15 +605,20 @@ async function syncVendas(
   admin: Admin,
   conn: BlingConn,
   token: string,
+  ctx: SyncContext,
 ): Promise<number> {
-  const desde = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
-  const pedidos = await fetchAllPages<BlingPedidoVenda>(token, "/pedidos/vendas", 50);
+  const pedidos = await fetchAllPages<BlingPedidoVenda>(
+    token,
+    "/pedidos/vendas",
+    50,
+    { dataInicial: ctx.since, dataFinal: ctx.until },
+  );
   const agg = new Map<string, { qtd: number; valor: number }>();
   let n = 0;
 
   for (const ped of pedidos) {
     const data = String(ped.data ?? "").slice(0, 10);
-    if (!data || data < desde) continue;
+    if (!data || data < ctx.since) continue;
     for (const item of ped.itens ?? []) {
       const blingProdId = item.produto?.id;
       if (!blingProdId) continue;
@@ -560,8 +659,10 @@ async function syncFilial(
   admin: Admin,
   conn: BlingConn,
   entidades: SyncEntityId[],
+  incremental: boolean,
 ) {
   const token = await ensureAccessToken(admin, conn);
+  const ctx = buildSyncContext(conn, incremental, 365);
   const results: Record<string, number> = {};
   const errors: string[] = [];
 
@@ -571,12 +672,21 @@ async function syncFilial(
     let status = "sucesso";
     let mensagem = "";
     try {
-      if (ent === "contatos") registros = await syncContatos(admin, conn, token);
-      else if (ent === "pedidos") registros = await syncPedidos(admin, conn, token);
-      else if (ent === "produtos") registros = await syncProdutos(admin, conn, token);
-      else if (ent === "estoque") registros = await syncEstoque(admin, conn, token);
-      else if (ent === "notas") registros = await syncNotas(admin, conn, token);
-      else if (ent === "vendas") registros = await syncVendas(admin, conn, token);
+      if (ent === "contatos") {
+        registros = await syncContatos(admin, conn, token, ctx);
+      } else if (ent === "pedidos") {
+        registros = await syncPedidos(admin, conn, token, ctx);
+      } else if (ent === "produtos") {
+        registros = await syncProdutos(admin, conn, token, ctx);
+      } else if (ent === "depositos") {
+        registros = await syncDepositos(admin, conn, token);
+      } else if (ent === "estoque") {
+        registros = await syncEstoque(admin, conn, token, ctx);
+      } else if (ent === "notas") {
+        registros = await syncNotas(admin, conn, token, ctx);
+      } else if (ent === "vendas") {
+        registros = await syncVendas(admin, conn, token, ctx);
+      }
     } catch (e) {
       status = "erro";
       mensagem = e instanceof Error ? e.message : String(e);
@@ -607,7 +717,8 @@ async function getCatalogTotals(
   admin: Admin,
   orgId: string,
 ): Promise<SyncSummary["totals"]> {
-  const [prodCount, fornCount, estCount, pedCount, nfeCount] = await Promise.all([
+  const [prodCount, fornCount, estCount, pedCount, nfeCount, depCount] =
+    await Promise.all([
     admin
       .from("produtos")
       .select("*", { count: "exact", head: true })
@@ -628,6 +739,10 @@ async function getCatalogTotals(
       .from("nfe_entrada")
       .select("*", { count: "exact", head: true })
       .eq("org_id", orgId),
+    admin
+      .from("bling_depositos")
+      .select("*", { count: "exact", head: true })
+      .eq("org_id", orgId),
   ]);
 
   return {
@@ -636,19 +751,21 @@ async function getCatalogTotals(
     estoque_linhas: estCount.count ?? 0,
     pedidos: pedCount.count ?? 0,
     notas: nfeCount.count ?? 0,
+    depositos: depCount.count ?? 0,
   };
 }
 
 export async function runBlingSync(
   orgId: string,
-  options?: { filialId?: string | null; entidades?: string[] },
+  options?: SyncRunOptions,
 ) {
   const admin = createAdminClient() as Admin;
   const entidades = filterSyncEntidades(options?.entidades);
+  const incremental = options?.incremental ?? false;
 
   if (entidades.length === 0) {
     throw new Error(
-      "Nenhuma entidade suportada selecionada. Disponíveis: contatos, pedidos, produtos, estoque, notas, vendas.",
+      "Nenhuma entidade suportada selecionada. Disponíveis: contatos, pedidos, produtos, depositos, estoque, notas, vendas.",
     );
   }
 
@@ -675,13 +792,32 @@ export async function runBlingSync(
 
   for (const c of conexoes) {
     const conn = c as BlingConn;
-    const { results, errors } = await syncFilial(admin, conn, entidades);
+    const { results, errors } = await syncFilial(
+      admin,
+      conn,
+      entidades,
+      incremental,
+    );
     allResults[conn.filial_id] = results;
     allErrors.push(...errors);
   }
 
+  let custoAtualizado = 0;
+  if (entidades.includes("notas")) {
+    try {
+      custoAtualizado = await applyCustoRealFromNfe(admin, orgId);
+    } catch (e) {
+      allErrors.push(
+        `custo_nfe: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
   const totals = await getCatalogTotals(admin, orgId);
   const imported = sumImported(allResults);
+  if (custoAtualizado > 0) {
+    imported.custo_atualizado = custoAtualizado;
+  }
   const summary: SyncSummary = { imported, totals };
 
   return {
@@ -690,5 +826,8 @@ export async function runBlingSync(
     results: allResults,
     errors: allErrors,
     summary,
+    trigger: options?.trigger ?? "manual",
   };
 }
+
+export type { SyncRunOptions };

@@ -16,6 +16,8 @@ export type BlingConn = {
   access_token: string | null;
   refresh_token: string | null;
   expires_at: string | null;
+  last_sync_at?: string | null;
+  bling_company_id?: string | null;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

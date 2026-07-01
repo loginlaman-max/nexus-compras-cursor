@@ -7,6 +7,10 @@ export type BlingProduto = {
   gtin?: string;
   ncm?: string;
   situacao?: string;
+  imagemURL?: string;
+  midia?: {
+    imagens?: { link?: string; url?: string; linkMiniatura?: string }[];
+  };
   fornecedor?: {
     id?: number;
     codigo?: string;

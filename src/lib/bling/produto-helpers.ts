@@ -1,5 +1,13 @@
 import type { BlingProduto, BlingProdutoFornecedor } from "./types";
 
+export function resolveImagemUrl(p: BlingProduto): string | null {
+  if (p.imagemURL) return p.imagemURL;
+  const imgs = p.midia?.imagens;
+  if (!imgs?.length) return null;
+  const first = imgs[0];
+  return first.link ?? first.url ?? first.linkMiniatura ?? null;
+}
+
 export function resolveProdutoCost(
   p: BlingProduto,
   fornecedorRel?: BlingProdutoFornecedor | null,

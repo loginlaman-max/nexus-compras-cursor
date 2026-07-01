@@ -1,7 +1,27 @@
 import { decodeState, exchangeCode } from "@/lib/bling/oauth";
+import { BLING_API_URL } from "@/lib/bling/config";
 import { getBlingCredentialsForOrg } from "@/lib/bling/org-credentials";
 import { blingConfigRedirect } from "@/lib/bling/redirect";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+async function fetchBlingCompanyId(accessToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${BLING_API_URL}/empresas/dados-basicos`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      data?: { id?: string | number; companyId?: string };
+    };
+    const id = json.data?.companyId ?? json.data?.id;
+    return id != null ? String(id) : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -57,6 +77,8 @@ export async function GET(request: Request) {
       });
     }
 
+    const companyId = await fetchBlingCompanyId(tokens.access_token);
+
     await admin.from("bling_conexoes").upsert(
       {
         org_id: state.org_id,
@@ -66,6 +88,7 @@ export async function GET(request: Request) {
         expires_at: expiresAt,
         status: "conectado",
         conta_nome: filial?.nome ?? state.filial_id,
+        bling_company_id: companyId,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "org_id,filial_id" },
