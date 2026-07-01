@@ -5,7 +5,7 @@ import { runBlingEntityPage } from "@/lib/bling/sync-runner";
 import type { SyncEntityId } from "@/lib/bling/sync-summary";
 import { createClient } from "@/lib/supabase/server";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(request: Request) {
   const supabase = await createClient();

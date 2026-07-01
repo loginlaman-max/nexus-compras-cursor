@@ -82,6 +82,7 @@ export function sumImported(
 export function buildSyncSummaryMessage(
   summary: SyncSummary,
   partial?: boolean,
+  errors?: string[],
 ): string {
   const parts: string[] = [];
   if (summary.imported.contatos > 0) {
@@ -147,7 +148,11 @@ export function buildSyncSummaryMessage(
     .join(", ");
 
   const prefix = partial ? "Sync parcial — " : "";
-  return `${prefix}${imported} Catálogo: ${catalog}.`;
+  const errHint =
+    partial && errors?.length
+      ? ` Detalhes: ${errors.slice(0, 2).join("; ")}.`
+      : "";
+  return `${prefix}${imported} Catálogo: ${catalog}.${errHint}`;
 }
 
 /** Dispara refresh do catálogo em qualquer tela após sync Bling. */

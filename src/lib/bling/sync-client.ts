@@ -20,6 +20,9 @@ const PAGINATED_ENTITIES = new Set<SyncEntityId>([
   "vendas",
 ]);
 
+/** Depósitos e estoque podem levar minutos — usam sync completo (300s). */
+const HEAVY_ENTITIES = new Set<SyncEntityId>(["depositos", "estoque"]);
+
 async function runEntityChunks(
   orgId: string,
   entidade: SyncEntityId,
@@ -68,6 +71,80 @@ async function runEntityChunks(
   return { registros: total, errors };
 }
 
+async function runHeavyEntitySync(
+  orgId: string,
+  entidade: SyncEntityId,
+  options: {
+    filialId?: string | null;
+    incremental?: boolean;
+  },
+): Promise<{ registros: number; errors: string[] }> {
+  const res = await fetch("/api/bling/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      org_id: orgId,
+      filial_id: options.filialId ?? undefined,
+      entidades: [entidade],
+      incremental: options.incremental ?? false,
+    }),
+  });
+
+  const data = (await res.json()) as {
+    error?: string;
+    errors?: string[];
+    summary?: SyncSummary;
+    partial?: boolean;
+  };
+
+  if (!res.ok) {
+    return {
+      registros: 0,
+      errors: [data.error ?? `${entidade}: falha na sync`],
+    };
+  }
+
+  const registros = data.summary?.imported?.[entidade] ?? 0;
+  const errors = data.errors?.length
+    ? data.errors
+    : data.partial
+      ? [`${entidade}: sync parcial`]
+      : [];
+
+  return { registros, errors };
+}
+
+async function loadCatalogTotals(
+  orgId: string,
+): Promise<SyncSummary["totals"]> {
+  const statusRes = await fetch(
+    `/api/bling/status?org_id=${encodeURIComponent(orgId)}`,
+  );
+  const statusData = (await statusRes.json()) as {
+    totais?: SyncSummary["totals"] & { vendas_linhas?: number };
+  };
+
+  if (!statusData.totais) {
+    return {
+      produtos: 0,
+      fornecedores: 0,
+      estoque_linhas: 0,
+      pedidos: 0,
+      notas: 0,
+      depositos: 0,
+    };
+  }
+
+  return {
+    produtos: statusData.totais.produtos,
+    fornecedores: statusData.totais.fornecedores,
+    estoque_linhas: statusData.totais.estoque_linhas,
+    pedidos: statusData.totais.pedidos,
+    notas: statusData.totais.notas,
+    depositos: statusData.totais.depositos,
+  };
+}
+
 export async function triggerBlingSync(
   orgId: string,
   options: {
@@ -83,6 +160,7 @@ export async function triggerBlingSync(
   message: string;
   summary?: SyncSummary;
   error?: string;
+  errors?: string[];
 }> {
   const entidades = orderSyncEntidades(
     (options.entidades?.length
@@ -107,7 +185,19 @@ export async function triggerBlingSync(
     const errors: string[] = [];
 
     for (const ent of entidades) {
-      if (PAGINATED_ENTITIES.has(ent)) {
+      if (HEAVY_ENTITIES.has(ent)) {
+        options.onProgress?.(ent, 1);
+        const { registros, errors: heavyErrors } = await runHeavyEntitySync(
+          orgId,
+          ent,
+          {
+            filialId: options.filialId,
+            incremental: options.incremental,
+          },
+        );
+        imported[ent] = registros;
+        errors.push(...heavyErrors);
+      } else if (PAGINATED_ENTITIES.has(ent)) {
         const { registros, errors: chunkErrors } = await runEntityChunks(
           orgId,
           ent,
@@ -146,41 +236,19 @@ export async function triggerBlingSync(
       }
     }
 
-    const statusRes = await fetch(
-      `/api/bling/status?org_id=${encodeURIComponent(orgId)}`,
-    );
-    const statusData = (await statusRes.json()) as {
-      totais?: SyncSummary["totals"] & { vendas_linhas?: number };
-    };
-
     const summary: SyncSummary = {
       imported,
-      totals: statusData.totais
-        ? {
-            produtos: statusData.totais.produtos,
-            fornecedores: statusData.totais.fornecedores,
-            estoque_linhas: statusData.totais.estoque_linhas,
-            pedidos: statusData.totais.pedidos,
-            notas: statusData.totais.notas,
-            depositos: statusData.totais.depositos,
-          }
-        : {
-        produtos: 0,
-        fornecedores: 0,
-        estoque_linhas: 0,
-        pedidos: 0,
-        notas: 0,
-        depositos: 0,
-      },
+      totals: await loadCatalogTotals(orgId),
     };
 
     const partial = errors.length > 0;
     return {
       ok: !partial || Object.values(imported).some((n) => n > 0),
       partial,
-      message: buildSyncSummaryMessage(summary, partial),
+      message: buildSyncSummaryMessage(summary, partial, errors),
       summary,
       error: partial ? errors[0] : undefined,
+      errors: partial ? errors : undefined,
     };
   }
 
@@ -201,6 +269,7 @@ export async function triggerBlingSync(
     message?: string;
     summary?: SyncSummary;
     error?: string;
+    errors?: string[];
   };
 
   if (!res.ok) {
@@ -216,6 +285,7 @@ export async function triggerBlingSync(
     partial: data.partial,
     message: data.message ?? "Sincronização concluída",
     summary: data.summary,
+    errors: data.errors,
   };
 }
 

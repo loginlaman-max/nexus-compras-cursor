@@ -68,7 +68,11 @@ export async function POST(request: Request) {
       results: outcome.results,
       summary: outcome.summary,
       errors: outcome.errors.length ? outcome.errors : undefined,
-      message: buildSyncSummaryMessage(outcome.summary, outcome.partial),
+      message: buildSyncSummaryMessage(
+        outcome.summary,
+        outcome.partial,
+        outcome.errors,
+      ),
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Falha na sincronização";

@@ -212,6 +212,7 @@ async function syncContatosPage(
   ctx: SyncContext,
   pagina: number,
   limite: number,
+  enrichBudget?: { n: number; max: number },
 ): Promise<EntityPageResult> {
   const extra = ctx.incremental ? alteracaoDesde(ctx) : undefined;
   const contatos = await fetchPage<BlingContato>(
@@ -223,9 +224,15 @@ async function syncContatosPage(
   );
   let n = 0;
   for (const raw of contatos) {
-    const c = contatoNeedsDetalhe(raw)
-      ? await enrichContato(token, raw)
-      : raw;
+    let c = raw;
+    if (
+      enrichBudget &&
+      enrichBudget.n < enrichBudget.max &&
+      contatoNeedsDetalhe(raw)
+    ) {
+      c = await enrichContato(token, raw);
+      enrichBudget.n++;
+    }
     if (await upsertFornecedor(admin, conn, c)) n++;
   }
   return { registros: n, hasMore: contatos.length >= limite, pagina };
@@ -239,8 +246,17 @@ async function syncContatos(
 ): Promise<number> {
   let total = 0;
   let pagina = 1;
+  const enrichBudget = { n: 0, max: 20 };
   for (;;) {
-    const page = await syncContatosPage(admin, conn, token, ctx, pagina, 100);
+    const page = await syncContatosPage(
+      admin,
+      conn,
+      token,
+      ctx,
+      pagina,
+      100,
+      enrichBudget,
+    );
     total += page.registros;
     if (!page.hasMore) break;
     pagina++;
@@ -925,18 +941,17 @@ export async function runBlingSync(
     query = query.eq("filial_id", options.filialId);
   }
 
-  const { data: conexoes, error } = await query;
+  const { data: conexoesRaw, error } = await query;
   if (error) throw new Error(error.message);
-  if (!conexoes?.length) {
-    throw new Error(
-      "Nenhuma conexão Bling ativa. Reconecte via OAuth na aba Credenciais.",
-    );
+  let activeConexoes = conexoesRaw ?? [];
+  if (!activeConexoes.length) {
+    activeConexoes = [await resolveBlingConnection(admin, orgId, null)];
   }
 
   const allResults: Record<string, Record<string, number>> = {};
   const allErrors: string[] = [];
 
-  for (const c of conexoes) {
+  for (const c of activeConexoes) {
     const conn = c as BlingConn;
     const { results, errors } = await syncFilial(
       admin,
@@ -979,6 +994,39 @@ export async function runBlingSync(
 
 export type { SyncRunOptions };
 
+async function resolveBlingConnection(
+  admin: Admin,
+  orgId: string,
+  filialId?: string | null,
+): Promise<BlingConn> {
+  let query = admin
+    .from("bling_conexoes")
+    .select("*")
+    .eq("org_id", orgId)
+    .eq("status", "conectado");
+
+  if (filialId) {
+    const { data: exact } = await query.eq("filial_id", filialId).limit(1);
+    if (exact?.[0]) return exact[0] as BlingConn;
+  }
+
+  const { data: conexoes, error } = await admin
+    .from("bling_conexoes")
+    .select("*")
+    .eq("org_id", orgId)
+    .eq("status", "conectado")
+    .limit(1);
+
+  if (error) throw new Error(error.message);
+  const conn = conexoes?.[0] as BlingConn | undefined;
+  if (!conn) {
+    throw new Error(
+      "Nenhuma conexão Bling ativa. Reconecte via OAuth na aba Credenciais.",
+    );
+  }
+  return conn;
+}
+
 export type EntityPageRunOptions = {
   filialId?: string | null;
   entidade: SyncEntityId;
@@ -995,30 +1043,18 @@ export async function runBlingEntityPage(
 ) {
   const admin = createAdminClient() as Admin;
   const pagina = options.pagina ?? 1;
-  const limite = options.limite ?? 100;
+  const limite =
+    options.entidade === "notas"
+      ? Math.min(options.limite ?? 100, 25)
+      : options.entidade === "vendas"
+        ? Math.min(options.limite ?? 100, 50)
+        : (options.limite ?? 100);
   const incremental = options.incremental ?? false;
   const skipEnrichment = options.skipEnrichment ?? incremental;
   const enrichLimit =
     options.enrichLimit ?? (skipEnrichment ? 0 : DEFAULT_ENRICH_LIMIT);
 
-  let query = admin
-    .from("bling_conexoes")
-    .select("*")
-    .eq("org_id", orgId)
-    .eq("status", "conectado");
-
-  if (options.filialId) {
-    query = query.eq("filial_id", options.filialId);
-  }
-
-  const { data: conexoes, error } = await query.limit(1);
-  if (error) throw new Error(error.message);
-  const conn = conexoes?.[0] as BlingConn | undefined;
-  if (!conn) {
-    throw new Error(
-      "Nenhuma conexão Bling ativa. Reconecte via OAuth na aba Credenciais.",
-    );
-  }
+  const conn = await resolveBlingConnection(admin, orgId, options.filialId);
 
   const token = await ensureAccessToken(admin, conn);
   const ctx = buildSyncContext(conn, incremental, 365);
