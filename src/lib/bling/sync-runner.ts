@@ -2,18 +2,30 @@ import {
   blingGet,
   ensureAccessToken,
   fetchAllPages,
+  fetchPage,
   filterSyncEntidades,
   type BlingConn,
   type SyncEntityId,
 } from "./api-client";
 import { applyCustoRealFromNfe } from "./custo-from-nfe";
 import { isFornecedorContato } from "./contato-helpers";
+import {
+  contatoNeedsDetalhe,
+  mergeContatoDetalhe,
+  resolveContatoEmail,
+  resolveContatoTelefone,
+  resolveContatoUf,
+} from "./contato-map";
 import { isNfeEntrada } from "./nfe-helpers";
 import {
   needsProdutoEnrichment,
+  resolveCategoria,
   resolveCodForn,
   resolveImagemUrl,
+  resolveMarca,
   resolveProdutoCost,
+  resolveSegmento,
+  resolveUnidade,
 } from "./produto-helpers";
 import {
   alteracaoDesde,
@@ -47,6 +59,19 @@ type BlingPedidoVenda = {
 };
 
 const ENRICH_DELAY_MS = 500;
+const DEFAULT_ENRICH_LIMIT = 50;
+
+type ProdutoSyncOpts = {
+  skipEnrichment?: boolean;
+  enrichLimit?: number;
+  enrichCount?: { n: number };
+};
+
+type EntityPageResult = {
+  registros: number;
+  hasMore: boolean;
+  pagina: number;
+};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Admin = ReturnType<typeof createAdminClient> & any;
@@ -117,59 +142,110 @@ async function enrichProdutoFornecedor(
   }
 }
 
+async function enrichContato(
+  token: string,
+  c: BlingContato,
+): Promise<BlingContato> {
+  if (!contatoNeedsDetalhe(c)) return c;
+  try {
+    await new Promise((r) => setTimeout(r, 350));
+    const json = await blingGet<{ data?: BlingContato }>(
+      token,
+      `/contatos/${c.id}`,
+    );
+    return mergeContatoDetalhe(c, json.data);
+  } catch {
+    return c;
+  }
+}
+
+async function upsertFornecedor(
+  admin: Admin,
+  conn: BlingConn,
+  c: BlingContato,
+): Promise<boolean> {
+  if (!isFornecedorContato(c)) return false;
+  const doc = String(c.numeroDocumento ?? "").replace(/\D/g, "");
+  if (!doc && !c.nome) return false;
+
+  const { data: existing } = await admin
+    .from("fornecedores")
+    .select("id")
+    .eq("org_id", conn.org_id)
+    .eq("bling_id", String(c.id))
+    .maybeSingle();
+
+  const payload = {
+    org_id: conn.org_id,
+    bling_id: String(c.id),
+    razao_social: c.nome ?? `Contato ${c.id}`,
+    nome_fantasia: c.nome ?? null,
+    cnpj: doc || null,
+    uf: resolveContatoUf(c),
+    email: resolveContatoEmail(c),
+    telefone: resolveContatoTelefone(c),
+    lead_time: 14,
+    tipo_frete: "FOB",
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existing?.id) {
+    await admin.from("fornecedores").update(payload).eq("id", existing.id);
+    await mapBlingId(admin, conn.org_id, "fornecedor", String(c.id), existing.id);
+  } else {
+    const { data: ins } = await admin
+      .from("fornecedores")
+      .insert(payload)
+      .select("id")
+      .single();
+    if (ins?.id) {
+      await mapBlingId(admin, conn.org_id, "fornecedor", String(c.id), ins.id);
+    }
+  }
+  return true;
+}
+
+async function syncContatosPage(
+  admin: Admin,
+  conn: BlingConn,
+  token: string,
+  ctx: SyncContext,
+  pagina: number,
+  limite: number,
+): Promise<EntityPageResult> {
+  const extra = ctx.incremental ? alteracaoDesde(ctx) : undefined;
+  const contatos = await fetchPage<BlingContato>(
+    token,
+    "/contatos",
+    pagina,
+    limite,
+    extra,
+  );
+  let n = 0;
+  for (const raw of contatos) {
+    const c = contatoNeedsDetalhe(raw)
+      ? await enrichContato(token, raw)
+      : raw;
+    if (await upsertFornecedor(admin, conn, c)) n++;
+  }
+  return { registros: n, hasMore: contatos.length >= limite, pagina };
+}
+
 async function syncContatos(
   admin: Admin,
   conn: BlingConn,
   token: string,
   ctx: SyncContext,
 ): Promise<number> {
-  const extra = ctx.incremental ? alteracaoDesde(ctx) : undefined;
-  const contatos = await fetchAllPages<BlingContato>(
-    token,
-    "/contatos",
-    100,
-    extra,
-  );
-  let n = 0;
-  for (const c of contatos) {
-    if (!isFornecedorContato(c)) continue;
-    const doc = String(c.numeroDocumento ?? "").replace(/\D/g, "");
-    if (!doc && !c.nome) continue;
-
-    const { data: existing } = await admin
-      .from("fornecedores")
-      .select("id")
-      .eq("org_id", conn.org_id)
-      .eq("bling_id", String(c.id))
-      .maybeSingle();
-
-    const payload = {
-      org_id: conn.org_id,
-      bling_id: String(c.id),
-      razao_social: c.nome ?? `Contato ${c.id}`,
-      nome_fantasia: c.nome ?? null,
-      cnpj: doc || null,
-      lead_time: 14,
-      tipo_frete: "FOB",
-      updated_at: new Date().toISOString(),
-    };
-
-    if (existing?.id) {
-      await admin.from("fornecedores").update(payload).eq("id", existing.id);
-      await mapBlingId(admin, conn.org_id, "fornecedor", String(c.id), existing.id);
-    } else {
-      const { data: ins } = await admin
-        .from("fornecedores")
-        .insert(payload)
-        .select("id")
-        .single();
-      if (ins?.id) {
-        await mapBlingId(admin, conn.org_id, "fornecedor", String(c.id), ins.id);
-      }
-    }
-    n++;
+  let total = 0;
+  let pagina = 1;
+  for (;;) {
+    const page = await syncContatosPage(admin, conn, token, ctx, pagina, 100);
+    total += page.registros;
+    if (!page.hasMore) break;
+    pagina++;
   }
-  return n;
+  return total;
 }
 
 function mapPedidoStatus(
@@ -258,74 +334,134 @@ async function syncPedidos(
   return n;
 }
 
+async function upsertProduto(
+  admin: Admin,
+  conn: BlingConn,
+  token: string,
+  p: BlingProduto,
+  opts?: ProdutoSyncOpts,
+): Promise<boolean> {
+  const sku = String(p.codigo ?? p.id);
+  const blingFornId = p.fornecedor?.contato?.id ?? p.fornecedor?.id;
+  const fornecedorId = await resolveFornecedorId(
+    admin,
+    conn.org_id,
+    blingFornId,
+  );
+
+  let fornecedorRel: BlingProdutoFornecedor | null = null;
+  const counter = opts?.enrichCount;
+  const limit = opts?.enrichLimit ?? DEFAULT_ENRICH_LIMIT;
+  const canEnrich =
+    !opts?.skipEnrichment &&
+    needsProdutoEnrichment(p) &&
+    (counter ? counter.n < limit : true);
+
+  if (canEnrich) {
+    fornecedorRel = await enrichProdutoFornecedor(token, p);
+    if (counter) counter.n++;
+  }
+
+  const custoNovo = resolveProdutoCost(p, fornecedorRel);
+  const codFornNovo = resolveCodForn(p, fornecedorRel);
+  const imagemUrl = resolveImagemUrl(p);
+  const segmento = resolveSegmento(p);
+  const categoria = resolveCategoria(p);
+  const marca = resolveMarca(p);
+  const unidade = resolveUnidade(p);
+
+  const { data: existing } = await admin
+    .from("produtos")
+    .select("id, custo_real, cod_forn, imagem_url, segmento, marca, categoria")
+    .eq("org_id", conn.org_id)
+    .eq("bling_id", String(p.id))
+    .maybeSingle();
+
+  const payload = {
+    org_id: conn.org_id,
+    bling_id: String(p.id),
+    sku,
+    cod_forn: codFornNovo ?? existing?.cod_forn ?? null,
+    descricao: p.nome ?? sku,
+    ean: p.gtin ?? null,
+    ncm: p.ncm ?? null,
+    unidade,
+    segmento: segmento ?? existing?.segmento ?? null,
+    marca: marca ?? existing?.marca ?? null,
+    categoria: categoria ?? existing?.categoria ?? null,
+    preco_venda: p.preco ?? null,
+    custo_real: custoNovo ?? existing?.custo_real ?? 0,
+    imagem_url: imagemUrl ?? existing?.imagem_url ?? null,
+    fornecedor_id: fornecedorId,
+    ativo: p.situacao !== "I",
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existing?.id) {
+    await admin.from("produtos").update(payload).eq("id", existing.id);
+    await mapBlingId(admin, conn.org_id, "produto", String(p.id), existing.id);
+  } else {
+    const { data: ins } = await admin
+      .from("produtos")
+      .insert(payload)
+      .select("id")
+      .single();
+    if (ins?.id) {
+      await mapBlingId(admin, conn.org_id, "produto", String(p.id), ins.id);
+    }
+  }
+  return true;
+}
+
+async function syncProdutosPage(
+  admin: Admin,
+  conn: BlingConn,
+  token: string,
+  ctx: SyncContext,
+  pagina: number,
+  limite: number,
+  opts?: ProdutoSyncOpts,
+): Promise<EntityPageResult> {
+  const extra = ctx.incremental ? alteracaoDesde(ctx) : undefined;
+  const produtos = await fetchPage<BlingProduto>(
+    token,
+    "/produtos",
+    pagina,
+    limite,
+    extra,
+  );
+  let n = 0;
+  for (const p of produtos) {
+    if (await upsertProduto(admin, conn, token, p, opts)) n++;
+  }
+  return { registros: n, hasMore: produtos.length >= limite, pagina };
+}
+
 async function syncProdutos(
   admin: Admin,
   conn: BlingConn,
   token: string,
   ctx: SyncContext,
+  opts?: ProdutoSyncOpts,
 ): Promise<number> {
-  const extra = ctx.incremental ? alteracaoDesde(ctx) : undefined;
-  const produtos = await fetchAllPages<BlingProduto>(
-    token,
-    "/produtos",
-    100,
-    extra,
-  );
-  let n = 0;
-  for (const p of produtos) {
-    const sku = String(p.codigo ?? p.id);
-    const blingFornId = p.fornecedor?.contato?.id ?? p.fornecedor?.id;
-    const fornecedorId = await resolveFornecedorId(
+  let total = 0;
+  let pagina = 1;
+  for (;;) {
+    const page = await syncProdutosPage(
       admin,
-      conn.org_id,
-      blingFornId,
+      conn,
+      token,
+      ctx,
+      pagina,
+      100,
+      opts,
     );
-
-    const fornecedorRel = await enrichProdutoFornecedor(token, p);
-    const custoNovo = resolveProdutoCost(p, fornecedorRel);
-    const codFornNovo = resolveCodForn(p, fornecedorRel);
-
-    const imagemUrl = resolveImagemUrl(p);
-
-    const { data: existing } = await admin
-      .from("produtos")
-      .select("id, custo_real, cod_forn, imagem_url")
-      .eq("org_id", conn.org_id)
-      .eq("bling_id", String(p.id))
-      .maybeSingle();
-
-    const payload = {
-      org_id: conn.org_id,
-      bling_id: String(p.id),
-      sku,
-      cod_forn: codFornNovo ?? existing?.cod_forn ?? null,
-      descricao: p.nome ?? sku,
-      ean: p.gtin ?? null,
-      ncm: p.ncm ?? null,
-      preco_venda: p.preco ?? null,
-      custo_real: custoNovo ?? existing?.custo_real ?? 0,
-      imagem_url: imagemUrl ?? existing?.imagem_url ?? null,
-      fornecedor_id: fornecedorId,
-      ativo: p.situacao !== "I",
-      updated_at: new Date().toISOString(),
-    };
-
-    if (existing?.id) {
-      await admin.from("produtos").update(payload).eq("id", existing.id);
-      await mapBlingId(admin, conn.org_id, "produto", String(p.id), existing.id);
-    } else {
-      const { data: ins } = await admin
-        .from("produtos")
-        .insert(payload)
-        .select("id")
-        .single();
-      if (ins?.id) {
-        await mapBlingId(admin, conn.org_id, "produto", String(p.id), ins.id);
-      }
-    }
-    n++;
+    total += page.registros;
+    if (!page.hasMore) break;
+    pagina++;
+    await new Promise((r) => setTimeout(r, 350));
   }
-  return n;
+  return total;
 }
 
 async function syncDepositos(
@@ -660,9 +796,15 @@ async function syncFilial(
   conn: BlingConn,
   entidades: SyncEntityId[],
   incremental: boolean,
+  syncOpts?: Pick<SyncRunOptions, "skipEnrichment" | "enrichLimit">,
 ) {
   const token = await ensureAccessToken(admin, conn);
   const ctx = buildSyncContext(conn, incremental, 365);
+  const produtoOpts: ProdutoSyncOpts = {
+    skipEnrichment: syncOpts?.skipEnrichment,
+    enrichLimit: syncOpts?.enrichLimit,
+    enrichCount: { n: 0 },
+  };
   const results: Record<string, number> = {};
   const errors: string[] = [];
 
@@ -677,7 +819,7 @@ async function syncFilial(
       } else if (ent === "pedidos") {
         registros = await syncPedidos(admin, conn, token, ctx);
       } else if (ent === "produtos") {
-        registros = await syncProdutos(admin, conn, token, ctx);
+        registros = await syncProdutos(admin, conn, token, ctx, produtoOpts);
       } else if (ent === "depositos") {
         registros = await syncDepositos(admin, conn, token);
       } else if (ent === "estoque") {
@@ -762,6 +904,10 @@ export async function runBlingSync(
   const admin = createAdminClient() as Admin;
   const entidades = filterSyncEntidades(options?.entidades);
   const incremental = options?.incremental ?? false;
+  const skipEnrichment =
+    options?.skipEnrichment ?? (incremental || options?.trigger === "cron");
+  const enrichLimit =
+    options?.enrichLimit ?? (skipEnrichment ? 0 : DEFAULT_ENRICH_LIMIT);
 
   if (entidades.length === 0) {
     throw new Error(
@@ -797,6 +943,7 @@ export async function runBlingSync(
       conn,
       entidades,
       incremental,
+      { skipEnrichment, enrichLimit },
     );
     allResults[conn.filial_id] = results;
     allErrors.push(...errors);
@@ -831,3 +978,350 @@ export async function runBlingSync(
 }
 
 export type { SyncRunOptions };
+
+export type EntityPageRunOptions = {
+  filialId?: string | null;
+  entidade: SyncEntityId;
+  pagina?: number;
+  limite?: number;
+  incremental?: boolean;
+  skipEnrichment?: boolean;
+  enrichLimit?: number;
+};
+
+export async function runBlingEntityPage(
+  orgId: string,
+  options: EntityPageRunOptions,
+) {
+  const admin = createAdminClient() as Admin;
+  const pagina = options.pagina ?? 1;
+  const limite = options.limite ?? 100;
+  const incremental = options.incremental ?? false;
+  const skipEnrichment = options.skipEnrichment ?? incremental;
+  const enrichLimit =
+    options.enrichLimit ?? (skipEnrichment ? 0 : DEFAULT_ENRICH_LIMIT);
+
+  let query = admin
+    .from("bling_conexoes")
+    .select("*")
+    .eq("org_id", orgId)
+    .eq("status", "conectado");
+
+  if (options.filialId) {
+    query = query.eq("filial_id", options.filialId);
+  }
+
+  const { data: conexoes, error } = await query.limit(1);
+  if (error) throw new Error(error.message);
+  const conn = conexoes?.[0] as BlingConn | undefined;
+  if (!conn) {
+    throw new Error(
+      "Nenhuma conexão Bling ativa. Reconecte via OAuth na aba Credenciais.",
+    );
+  }
+
+  const token = await ensureAccessToken(admin, conn);
+  const ctx = buildSyncContext(conn, incremental, 365);
+  const produtoOpts: ProdutoSyncOpts = {
+    skipEnrichment,
+    enrichLimit,
+    enrichCount: { n: 0 },
+  };
+
+  let page: EntityPageResult = { registros: 0, hasMore: false, pagina };
+  const t0 = Date.now();
+
+  try {
+    switch (options.entidade) {
+      case "contatos":
+        page = await syncContatosPage(
+          admin,
+          conn,
+          token,
+          ctx,
+          pagina,
+          limite,
+        );
+        break;
+      case "produtos":
+        page = await syncProdutosPage(
+          admin,
+          conn,
+          token,
+          ctx,
+          pagina,
+          limite,
+          produtoOpts,
+        );
+        break;
+      case "pedidos": {
+        const pedidos = await fetchPage<BlingPedidoCompra>(
+          token,
+          "/pedidos/compras",
+          pagina,
+          limite,
+          { dataInicial: ctx.since },
+        );
+        let n = 0;
+        for (const ped of pedidos) {
+          const blingFornId = ped.fornecedor?.contato?.id ?? ped.fornecedor?.id;
+          const fornecedorId = await resolveFornecedorId(
+            admin,
+            conn.org_id,
+            blingFornId,
+          );
+          const numero = String(ped.numero ?? ped.id);
+          const emissao = String(ped.data ?? "").slice(0, 10) || null;
+          const { data: existing } = await admin
+            .from("pedidos_compra")
+            .select("id")
+            .eq("org_id", conn.org_id)
+            .eq("bling_id", String(ped.id))
+            .maybeSingle();
+          const payload = {
+            org_id: conn.org_id,
+            bling_id: String(ped.id),
+            filial_id: conn.filial_id,
+            numero,
+            fornecedor_id: fornecedorId,
+            valor: Number(ped.total ?? ped.totalProdutos) || null,
+            status: mapPedidoStatus(ped.situacao),
+            emissao,
+            updated_at: new Date().toISOString(),
+          };
+          if (existing?.id) {
+            await admin.from("pedidos_compra").update(payload).eq("id", existing.id);
+            await mapBlingId(
+              admin,
+              conn.org_id,
+              "pedido_compra",
+              String(ped.id),
+              existing.id,
+            );
+          } else {
+            const { data: ins } = await admin
+              .from("pedidos_compra")
+              .insert(payload)
+              .select("id")
+              .single();
+            if (ins?.id) {
+              await mapBlingId(
+                admin,
+                conn.org_id,
+                "pedido_compra",
+                String(ped.id),
+                ins.id,
+              );
+            }
+          }
+          n++;
+        }
+        page = { registros: n, hasMore: pedidos.length >= limite, pagina };
+        break;
+      }
+      case "depositos":
+        page = {
+          registros: await syncDepositos(admin, conn, token),
+          hasMore: false,
+          pagina: 1,
+        };
+        break;
+      case "estoque":
+        page = {
+          registros: await syncEstoque(admin, conn, token, ctx),
+          hasMore: false,
+          pagina: 1,
+        };
+        break;
+      case "notas": {
+        const notas = await fetchPage<BlingNfeResumo>(token, "/nfe", pagina, limite, {
+          dataEmissaoInicial: ctx.since,
+          dataEmissaoFinal: ctx.until,
+          tipo: "0",
+        });
+        let n = 0;
+        for (const resumo of notas) {
+          if (!isNfeEntrada(resumo)) continue;
+          let detalhe: BlingNfeDetalhe = resumo;
+          try {
+            await new Promise((r) => setTimeout(r, ENRICH_DELAY_MS));
+            const json = await blingGet<{ data?: BlingNfeDetalhe }>(
+              token,
+              `/nfe/${resumo.id}`,
+            );
+            if (json.data) detalhe = { ...resumo, ...json.data };
+          } catch {
+            /* usa resumo */
+          }
+          if (!isNfeEntrada(detalhe)) continue;
+          const blingContatoId = detalhe.contato?.id;
+          const fornecedorId = await resolveFornecedorId(
+            admin,
+            conn.org_id,
+            blingContatoId,
+          );
+          const cnpj = String(detalhe.contato?.numeroDocumento ?? "").replace(
+            /\D/g,
+            "",
+          );
+          const chave = detalhe.chaveAcesso ?? null;
+          const numero = String(detalhe.numero ?? resumo.id);
+          const emissao =
+            String(detalhe.dataEmissao ?? "").slice(0, 10) || null;
+          const valorProdutos =
+            Number(detalhe.valorNota ?? detalhe.valor) || null;
+          const tipoFrete = mapTipoFrete(detalhe.transporte?.fretePorConta);
+          const { data: existing } = await admin
+            .from("nfe_entrada")
+            .select("id")
+            .eq("org_id", conn.org_id)
+            .eq("bling_id", String(resumo.id))
+            .maybeSingle();
+          const nfePayload = {
+            org_id: conn.org_id,
+            bling_id: String(resumo.id),
+            filial_id: conn.filial_id,
+            chave,
+            numero,
+            serie: String(detalhe.serie ?? "1"),
+            emissao,
+            data_entrada: emissao,
+            fornecedor_id: fornecedorId,
+            fornecedor_nome: detalhe.contato?.nome ?? null,
+            fornecedor_cnpj: cnpj || null,
+            tipo_frete: tipoFrete,
+            valor_produtos: valorProdutos,
+            valor_total: valorProdutos,
+            situacao: mapNfeSituacao(detalhe.situacao),
+            avulsa: !fornecedorId,
+          };
+          let nfeId = existing?.id as string | undefined;
+          if (nfeId) {
+            await admin.from("nfe_entrada").update(nfePayload).eq("id", nfeId);
+          } else {
+            const { data: ins } = await admin
+              .from("nfe_entrada")
+              .insert(nfePayload)
+              .select("id")
+              .single();
+            nfeId = ins?.id;
+          }
+          if (nfeId && detalhe.itens?.length) {
+            await admin.from("nfe_item").delete().eq("nfe_id", nfeId);
+            const items = detalhe.itens.map((item) => ({
+              nfe_id: nfeId,
+              sku: String(item.produto?.codigo ?? item.codigo ?? ""),
+              cod_forn: item.codigo ?? null,
+              ean: item.gtin ?? null,
+              ncm: item.ncm ?? null,
+              nome: item.descricao ?? null,
+              qtd_nf: Number(item.quantidade) || 0,
+              custo_nf: Number(item.valor) || null,
+            }));
+            if (items.length) await admin.from("nfe_item").insert(items);
+          }
+          n++;
+        }
+        page = { registros: n, hasMore: notas.length >= limite, pagina };
+        break;
+      }
+      case "vendas": {
+        const pedidos = await fetchPage<BlingPedidoVenda>(
+          token,
+          "/pedidos/vendas",
+          pagina,
+          Math.min(limite, 50),
+          { dataInicial: ctx.since, dataFinal: ctx.until },
+        );
+        const agg = new Map<string, { qtd: number; valor: number }>();
+        for (const ped of pedidos) {
+          const data = String(ped.data ?? "").slice(0, 10);
+          if (!data || data < ctx.since) continue;
+          for (const item of ped.itens ?? []) {
+            const blingProdId = item.produto?.id;
+            if (!blingProdId) continue;
+            const { data: prod } = await admin
+              .from("produtos")
+              .select("id")
+              .eq("org_id", conn.org_id)
+              .eq("bling_id", String(blingProdId))
+              .maybeSingle();
+            if (!prod?.id) continue;
+            const key = `${prod.id}|${data}`;
+            const cur = agg.get(key) ?? { qtd: 0, valor: 0 };
+            cur.qtd += Number(item.quantidade) || 0;
+            cur.valor += Number(item.valor) || 0;
+            agg.set(key, cur);
+          }
+        }
+        let n = 0;
+        for (const [key, v] of agg) {
+          const [produtoId, data] = key.split("|");
+          await admin.from("vendas_diarias").upsert(
+            {
+              org_id: conn.org_id,
+              filial_id: conn.filial_id,
+              produto_id: produtoId,
+              data,
+              qtd: v.qtd,
+              valor: v.valor,
+            },
+            { onConflict: "org_id,filial_id,produto_id,data" },
+          );
+          n++;
+        }
+        page = {
+          registros: n,
+          hasMore: pedidos.length >= Math.min(limite, 50),
+          pagina,
+        };
+        break;
+      }
+      default:
+        throw new Error(`Entidade não suportada em chunk: ${options.entidade}`);
+    }
+  } catch (e) {
+    await logSync(admin, {
+      org_id: conn.org_id,
+      filial_id: conn.filial_id,
+      funcao: `bling-sync-chunk-${options.entidade}`,
+      status: "erro",
+      registros: page.registros,
+      mensagem: e instanceof Error ? e.message : String(e),
+      duration_ms: Date.now() - t0,
+    });
+    throw e;
+  }
+
+  await logSync(admin, {
+    org_id: conn.org_id,
+    filial_id: conn.filial_id,
+    funcao: `bling-sync-chunk-${options.entidade}`,
+    status: "sucesso",
+    registros: page.registros,
+    duration_ms: Date.now() - t0,
+  });
+
+  if (!page.hasMore && options.entidade === "notas") {
+    try {
+      await applyCustoRealFromNfe(admin, orgId);
+    } catch {
+      /* custo aplicado na próxima execução completa */
+    }
+  }
+
+  if (!page.hasMore) {
+    await admin
+      .from("bling_conexoes")
+      .update({ last_sync_at: new Date().toISOString() })
+      .eq("org_id", conn.org_id)
+      .eq("filial_id", conn.filial_id);
+  }
+
+  return {
+    ok: true,
+    entidade: options.entidade,
+    filial_id: conn.filial_id,
+    ...page,
+  };
+}

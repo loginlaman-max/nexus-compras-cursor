@@ -6,7 +6,11 @@ export type BlingProduto = {
   precoCusto?: number;
   gtin?: string;
   ncm?: string;
+  unidade?: string;
   situacao?: string;
+  marca?: string;
+  linhaProduto?: { id?: number; descricao?: string };
+  categoria?: { id?: number; descricao?: string; nome?: string };
   imagemURL?: string;
   midia?: {
     imagens?: { link?: string; url?: string; linkMiniatura?: string }[];
@@ -34,10 +38,22 @@ export type BlingContato = {
   nome?: string;
   numeroDocumento?: string;
   situacao?: string;
+  email?: string;
+  telefone?: string;
+  celular?: string;
+  fone?: string;
+  emails?: { email?: string }[];
+  endereco?: {
+    uf?: string;
+    UF?: string;
+    geral?: { uf?: string; UF?: string };
+  };
   /** Pessoa F/J na listagem, ou objeto { cliente, fornecedor } no detalhe. */
   tipo?: string | { cliente?: boolean; fornecedor?: boolean };
   tiposContato?: { id?: number; descricao?: string }[];
 };
+
+export type BlingContatoDetalhe = BlingContato;
 
 export type BlingPedidoCompra = {
   id: number;

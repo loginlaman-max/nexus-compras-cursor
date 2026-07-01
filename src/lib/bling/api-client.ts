@@ -104,6 +104,21 @@ export async function blingGet<T>(
   return res.json() as Promise<T>;
 }
 
+export async function fetchPage<T>(
+  token: string,
+  path: string,
+  pagina: number,
+  limite = 100,
+  extraParams?: Record<string, string>,
+): Promise<T[]> {
+  const json = await blingGet<{ data?: T[] }>(token, path, {
+    pagina: String(pagina),
+    limite: String(limite),
+    ...extraParams,
+  });
+  return json.data ?? [];
+}
+
 export async function fetchAllPages<T>(
   token: string,
   path: string,

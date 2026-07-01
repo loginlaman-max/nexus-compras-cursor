@@ -1,5 +1,7 @@
 import type { Product } from "./products-data";
 
+type ProductMeta = Product & { marca?: string; unidade?: string };
+
 export const MARCAS = [
   "HIKVISION",
   "HILOOK",
@@ -31,6 +33,8 @@ const CAT_KEYS: { re: RegExp; cat: string }[] = [
 ];
 
 export function marcaDe(p: Product): string {
+  const meta = p as ProductMeta;
+  if (meta.marca?.trim()) return meta.marca.trim();
   const n = (p.nome || "").toUpperCase();
   for (const m of MARCAS) {
     if (n.includes(m)) return m;
@@ -39,6 +43,7 @@ export function marcaDe(p: Product): string {
 }
 
 export function categoriaDe(p: Product): string {
+  if (p.seg && p.seg !== "Geral") return p.seg;
   const n = (p.nome || "").toUpperCase();
   for (const c of CAT_KEYS) {
     if (c.re.test(n)) return c.cat;

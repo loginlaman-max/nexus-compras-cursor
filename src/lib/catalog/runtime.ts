@@ -16,6 +16,9 @@ export type FornecedorInfo = {
   cnpj: string;
   leadTime: number;
   frete: "CIF" | "FOB";
+  uf?: string;
+  email?: string;
+  telefone?: string;
 };
 
 let liveProducts: Product[] = [];

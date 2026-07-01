@@ -8,6 +8,25 @@ export function resolveImagemUrl(p: BlingProduto): string | null {
   return first.link ?? first.url ?? first.linkMiniatura ?? null;
 }
 
+export function resolveUnidade(p: BlingProduto): string {
+  const u = String(p.unidade ?? "").trim();
+  return u || "UN";
+}
+
+export function resolveMarca(p: BlingProduto): string | null {
+  const direct = String(p.marca ?? p.linhaProduto?.descricao ?? "").trim();
+  return direct || null;
+}
+
+export function resolveSegmento(p: BlingProduto): string | null {
+  const cat = p.categoria?.descricao ?? p.categoria?.nome;
+  return cat ? String(cat).trim() : null;
+}
+
+export function resolveCategoria(p: BlingProduto): string | null {
+  return resolveSegmento(p);
+}
+
 export function resolveProdutoCost(
   p: BlingProduto,
   fornecedorRel?: BlingProdutoFornecedor | null,

@@ -23,6 +23,9 @@ function mapFornecedor(row: Row): FornecedorInfo {
     cnpj: String(row.cnpj ?? ""),
     leadTime: Number(row.lead_time) || 14,
     frete: (row.tipo_frete as "CIF" | "FOB") ?? "FOB",
+    uf: row.uf ? String(row.uf) : undefined,
+    email: row.email ? String(row.email) : undefined,
+    telefone: row.telefone ? String(row.telefone) : undefined,
   };
 }
 
@@ -49,7 +52,7 @@ function mapProduto(
     fornCnpj: (forn?.cnpj ?? "") as Product["fornCnpj"],
     leadTime: (forn?.leadTime ?? 14) as Product["leadTime"],
     frete: forn?.frete ?? "FOB",
-    seg: String(row.segmento ?? "Geral"),
+    seg: String(row.segmento ?? row.categoria ?? "Geral"),
     comprador: "—",
     curvaF: (row.curva_abc as string) ?? "C",
     curvaR: (row.curva_abc as string) ?? "C",
@@ -65,7 +68,9 @@ function mapProduto(
     dias: vDia > 0 ? Math.round(estoque / vDia) : 999,
     preco,
     custo,
-  };
+    ...(row.marca ? { marca: String(row.marca) } : {}),
+    ...(row.unidade ? { unidade: String(row.unidade) } : {}),
+  } as Product & { marca?: string; unidade?: string };
 }
 
 export async function loadCatalogFromSupabase(

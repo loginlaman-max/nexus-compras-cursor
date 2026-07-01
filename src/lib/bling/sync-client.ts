@@ -1,17 +1,81 @@
-import { INITIAL_SYNC_ENTITIES } from "./sync-summary";
+import {
+  INITIAL_SYNC_ENTITIES,
+  orderSyncEntidades,
+  SYNC_ENTITY_ORDER,
+  type SyncEntityId,
+  type SyncSummary,
+} from "./sync-summary";
 import {
   buildSyncSummaryMessage,
   notifyCatalogSyncDone,
-  type SyncSummary,
 } from "./sync-summary";
 
 export type { SyncSummary };
+
+const PAGINATED_ENTITIES = new Set<SyncEntityId>([
+  "contatos",
+  "pedidos",
+  "produtos",
+  "notas",
+  "vendas",
+]);
+
+async function runEntityChunks(
+  orgId: string,
+  entidade: SyncEntityId,
+  options: {
+    filialId?: string | null;
+    incremental?: boolean;
+    skipEnrichment?: boolean;
+    onProgress?: (entidade: SyncEntityId, pagina: number) => void;
+  },
+): Promise<{ registros: number; errors: string[] }> {
+  let pagina = 1;
+  let total = 0;
+  const errors: string[] = [];
+
+  for (;;) {
+    options.onProgress?.(entidade, pagina);
+    const res = await fetch("/api/bling/sync/chunk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        org_id: orgId,
+        filial_id: options.filialId ?? undefined,
+        entidade,
+        pagina,
+        incremental: options.incremental ?? false,
+        skip_enrichment: options.skipEnrichment,
+      }),
+    });
+
+    const data = (await res.json()) as {
+      error?: string;
+      registros?: number;
+      hasMore?: boolean;
+    };
+
+    if (!res.ok) {
+      errors.push(`${entidade}: ${data.error ?? "Falha no chunk"}`);
+      break;
+    }
+
+    total += data.registros ?? 0;
+    if (!data.hasMore) break;
+    pagina++;
+  }
+
+  return { registros: total, errors };
+}
 
 export async function triggerBlingSync(
   orgId: string,
   options: {
     filialId?: string | null;
     entidades?: string[];
+    incremental?: boolean;
+    chunked?: boolean;
+    onProgress?: (entidade: SyncEntityId, pagina: number) => void;
   } = {},
 ): Promise<{
   ok: boolean;
@@ -20,6 +84,106 @@ export async function triggerBlingSync(
   summary?: SyncSummary;
   error?: string;
 }> {
+  const entidades = orderSyncEntidades(
+    (options.entidades?.length
+      ? options.entidades.filter((id): id is SyncEntityId =>
+          (SYNC_ENTITY_ORDER as readonly string[]).includes(id),
+        )
+      : [...SYNC_ENTITY_ORDER]) as SyncEntityId[],
+  );
+
+  const useChunked = options.chunked !== false;
+
+  if (useChunked) {
+    const imported = {
+      contatos: 0,
+      pedidos: 0,
+      produtos: 0,
+      depositos: 0,
+      estoque: 0,
+      notas: 0,
+      vendas: 0,
+    };
+    const errors: string[] = [];
+
+    for (const ent of entidades) {
+      if (PAGINATED_ENTITIES.has(ent)) {
+        const { registros, errors: chunkErrors } = await runEntityChunks(
+          orgId,
+          ent,
+          {
+            filialId: options.filialId,
+            incremental: options.incremental,
+            skipEnrichment: options.incremental,
+            onProgress: options.onProgress,
+          },
+        );
+        imported[ent] = registros;
+        errors.push(...chunkErrors);
+      } else {
+        options.onProgress?.(ent, 1);
+        const res = await fetch("/api/bling/sync/chunk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            org_id: orgId,
+            filial_id: options.filialId ?? undefined,
+            entidade: ent,
+            pagina: 1,
+            incremental: options.incremental ?? false,
+            skip_enrichment: options.incremental,
+          }),
+        });
+        const data = (await res.json()) as {
+          error?: string;
+          registros?: number;
+        };
+        if (!res.ok) {
+          errors.push(`${ent}: ${data.error ?? "Falha no chunk"}`);
+        } else {
+          imported[ent] = data.registros ?? 0;
+        }
+      }
+    }
+
+    const statusRes = await fetch(
+      `/api/bling/status?org_id=${encodeURIComponent(orgId)}`,
+    );
+    const statusData = (await statusRes.json()) as {
+      totais?: SyncSummary["totals"] & { vendas_linhas?: number };
+    };
+
+    const summary: SyncSummary = {
+      imported,
+      totals: statusData.totais
+        ? {
+            produtos: statusData.totais.produtos,
+            fornecedores: statusData.totais.fornecedores,
+            estoque_linhas: statusData.totais.estoque_linhas,
+            pedidos: statusData.totais.pedidos,
+            notas: statusData.totais.notas,
+            depositos: statusData.totais.depositos,
+          }
+        : {
+        produtos: 0,
+        fornecedores: 0,
+        estoque_linhas: 0,
+        pedidos: 0,
+        notas: 0,
+        depositos: 0,
+      },
+    };
+
+    const partial = errors.length > 0;
+    return {
+      ok: !partial || Object.values(imported).some((n) => n > 0),
+      partial,
+      message: buildSyncSummaryMessage(summary, partial),
+      summary,
+      error: partial ? errors[0] : undefined,
+    };
+  }
+
   const res = await fetch("/api/bling/sync", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -27,6 +191,7 @@ export async function triggerBlingSync(
       org_id: orgId,
       filial_id: options.filialId ?? undefined,
       entidades: options.entidades,
+      incremental: options.incremental,
     }),
   });
 
@@ -61,6 +226,7 @@ export async function runInitialBlingSync(
   const result = await triggerBlingSync(orgId, {
     filialId,
     entidades: [...INITIAL_SYNC_ENTITIES],
+    chunked: true,
   });
   if (result.ok) {
     notifyCatalogSyncDone();
@@ -72,4 +238,8 @@ export async function runInitialBlingSync(
   };
 }
 
-export { buildSyncSummaryMessage, notifyCatalogSyncDone, INITIAL_SYNC_ENTITIES };
+export {
+  buildSyncSummaryMessage,
+  notifyCatalogSyncDone,
+  INITIAL_SYNC_ENTITIES,
+};

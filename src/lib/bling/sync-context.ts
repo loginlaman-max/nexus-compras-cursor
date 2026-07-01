@@ -5,7 +5,11 @@ export type SyncRunOptions = {
   entidades?: string[];
   /** Usa last_sync_at para filtrar alterações recentes. */
   incremental?: boolean;
-  trigger?: "manual" | "cron" | "webhook";
+  trigger?: "manual" | "cron" | "webhook" | "chunk";
+  /** Limite de chamadas /produtos/{id}/fornecedores por execução. */
+  enrichLimit?: number;
+  /** Pula enrichment de fornecedor do produto (cron/incremental). */
+  skipEnrichment?: boolean;
 };
 
 export type SyncContext = {
