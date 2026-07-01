@@ -181,6 +181,7 @@ export function BlingPageView({
   const [syncing, setSyncing] = useState(false);
   const [savingCred, setSavingCred] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
+  const [secretEditing, setSecretEditing] = useState(false);
   const [connectFilialId, setConnectFilialId] = useState("");
   const [connectOpen, setConnectOpen] = useState(false);
   const [appCred, setAppCred] = useState({
@@ -243,6 +244,7 @@ export function BlingPageView({
       secret_set: !!data.secret_set,
       redirect_uri: data.redirect_uri ?? "",
     }));
+    if (data.secret_set) setSecretEditing(false);
   }, [activeOrg.orgId, demo]);
 
   useEffect(() => {
@@ -401,6 +403,8 @@ export function BlingPageView({
         secret_set: true,
         redirect_uri: data.redirect_uri ?? c.redirect_uri,
       }));
+      setSecretEditing(false);
+      setShowSecret(false);
       await loadStatus();
       toast.success("Credenciais salvas — agora clique em Conectar conta");
       onSaved?.("Credenciais Bling salvas");
@@ -919,35 +923,88 @@ export function BlingPageView({
               />
             </div>
             <div className="nx-set-field">
-              <label>Client Secret</label>
-              <div className="nx-bling-secret">
-                <input
-                  type={showSecret ? "text" : "password"}
-                  value={appCred.client_secret}
-                  onChange={(e) =>
-                    setAppCred((c) => ({
-                      ...c,
-                      client_secret: e.target.value,
-                    }))
-                  }
-                  placeholder={
-                    appCred.secret_set
-                      ? "Deixe em branco para manter o atual"
-                      : "Do painel Bling → seu aplicativo"
-                  }
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowSecret((s) => !s)}
-                  title={showSecret ? "Ocultar" : "Mostrar"}
-                >
-                  {showSecret ? (
-                    <EyeOff className="size-3.5" />
-                  ) : (
-                    <Eye className="size-3.5" />
-                  )}
-                </button>
-              </div>
+              <label>
+                Client Secret
+                {appCred.secret_set && !secretEditing && (
+                  <span
+                    className="pill pill-ok"
+                    style={{ marginLeft: 8, fontSize: 9 }}
+                  >
+                    Salvo
+                  </span>
+                )}
+              </label>
+              {appCred.secret_set && !secretEditing ? (
+                <>
+                  <div className="nx-bling-secret">
+                    <input
+                      readOnly
+                      value="••••••••••••••••••••••••"
+                      style={{ color: "hsl(var(--muted-foreground))" }}
+                    />
+                    <span
+                      style={{
+                        width: 38,
+                        height: 34,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        border: "1px solid hsl(var(--input))",
+                        borderLeft: 0,
+                        borderRadius: "0 var(--radius-sm) var(--radius-sm) 0",
+                        background: "hsl(var(--status-ok) / 0.12)",
+                        color: "hsl(var(--status-ok))",
+                        fontSize: 14,
+                      }}
+                      title="Secret salvo"
+                    >
+                      ✓
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ marginTop: 6, padding: "4px 0", fontSize: 12 }}
+                    onClick={() => {
+                      setSecretEditing(true);
+                      setAppCred((c) => ({ ...c, client_secret: "" }));
+                    }}
+                  >
+                    Substituir Client Secret
+                  </button>
+                </>
+              ) : (
+                <div className="nx-bling-secret">
+                  <input
+                    type={showSecret ? "text" : "password"}
+                    value={appCred.client_secret}
+                    onChange={(e) =>
+                      setAppCred((c) => ({
+                        ...c,
+                        client_secret: e.target.value,
+                      }))
+                    }
+                    placeholder="Cole o Client Secret do painel Bling"
+                    autoFocus={secretEditing}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSecret((s) => !s)}
+                    title={showSecret ? "Ocultar" : "Mostrar"}
+                  >
+                    {showSecret ? (
+                      <EyeOff className="size-3.5" />
+                    ) : (
+                      <Eye className="size-3.5" />
+                    )}
+                  </button>
+                </div>
+              )}
+              <span className="nx-set-hint" style={{ marginTop: 6 }}>
+                {appCred.secret_set && !secretEditing
+                  ? "O secret fica armazenado com segurança no servidor e não é exibido novamente."
+                  : "Informe o secret completo do aplicativo Bling."}
+              </span>
             </div>
             <div className="nx-set-field full">
               <label>URL de Redirecionamento (OAuth callback)</label>
