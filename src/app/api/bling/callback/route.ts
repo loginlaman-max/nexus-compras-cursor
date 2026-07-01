@@ -1,7 +1,7 @@
 import { decodeState, exchangeCode } from "@/lib/bling/oauth";
 import { getBlingCredentialsForOrg } from "@/lib/bling/org-credentials";
 import { blingConfigRedirect } from "@/lib/bling/redirect";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createAdminClient, getServiceRoleKey } from "@/lib/supabase/admin";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -71,7 +71,7 @@ export async function GET(request: Request) {
     );
 
     const fnUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/bling-sync`;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const serviceKey = getServiceRoleKey();
     if (fnUrl && serviceKey) {
       fetch(fnUrl, {
         method: "POST",

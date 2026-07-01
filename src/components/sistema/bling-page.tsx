@@ -238,6 +238,8 @@ export function BlingPageView({
       client_id: string;
       secret_set: boolean;
       redirect_uri: string;
+      service_role_configured?: boolean;
+      source?: string | null;
     };
     const isConfigured = !!data.configured || !!data.secret_set;
     setAppCred((c) => ({
@@ -248,9 +250,27 @@ export function BlingPageView({
     }));
     if (isConfigured) {
       setSecretEditing(false);
-      setStatus((prev) =>
-        prev ? { ...prev, bling_configured: true } : prev,
-      );
+      setStatus((prev) => {
+        const serviceOk =
+          !!data.service_role_configured ||
+          data.source === "org" ||
+          !!prev?.service_role_configured;
+        if (prev) {
+          return {
+            ...prev,
+            bling_configured: true,
+            service_role_configured: serviceOk,
+          };
+        }
+        return {
+          bling_configured: true,
+          service_role_configured: serviceOk,
+          conexoes: [],
+          logs: [],
+          totais: { produtos: 0, fornecedores: 0, estoque_linhas: 0 },
+          conectadas: 0,
+        };
+      });
     }
   }, [activeOrg.orgId, demo]);
 
@@ -281,8 +301,12 @@ export function BlingPageView({
   const credentialsReady =
     appCred.secret_set || !!status?.bling_configured;
 
+  const serviceRoleReady =
+    !!status?.service_role_configured ||
+    (credentialsReady && appCred.secret_set);
+
   const serverReady =
-    !demo && credentialsReady && !!status?.service_role_configured;
+    !demo && credentialsReady && serviceRoleReady;
 
   const toggleEnt = (id: string) => {
     setEnts((prev) => {
@@ -378,7 +402,42 @@ export function BlingPageView({
       setTab("credenciais");
       return;
     }
-    if (!status?.service_role_configured) {
+
+    let serviceOk =
+      !!status?.service_role_configured ||
+      (credsOk && appCred.secret_set);
+    if (!serviceOk) {
+      const statusRes = await fetch(
+        `/api/bling/status?org_id=${encodeURIComponent(activeOrg.orgId)}`,
+      );
+      if (statusRes.ok) {
+        const fresh = (await statusRes.json()) as BlingStatus;
+        setStatus(fresh);
+        serviceOk = !!fresh.service_role_configured;
+      }
+    }
+    if (!serviceOk) {
+      const credRes = await fetch(
+        `/api/bling/credentials?org_id=${encodeURIComponent(activeOrg.orgId)}`,
+      );
+      if (credRes.ok) {
+        const credData = (await credRes.json()) as {
+          service_role_configured?: boolean;
+          configured?: boolean;
+          source?: string | null;
+        };
+        serviceOk =
+          !!credData.service_role_configured ||
+          (!!credData.configured && credData.source === "org");
+        if (serviceOk) {
+          setStatus((prev) =>
+            prev ? { ...prev, service_role_configured: true } : prev,
+          );
+        }
+      }
+    }
+
+    if (!serviceOk) {
       toast.error(
         "SUPABASE_SERVICE_ROLE_KEY não configurada na Vercel. Necessária para salvar tokens após o OAuth.",
       );
@@ -436,15 +495,12 @@ export function BlingPageView({
       setShowSecret(false);
       setStatus((prev) =>
         prev
-          ? { ...prev, bling_configured: true }
-          : {
+          ? {
+              ...prev,
               bling_configured: true,
-              service_role_configured: false,
-              conexoes: [],
-              logs: [],
-              totais: { produtos: 0, fornecedores: 0, estoque_linhas: 0 },
-              conectadas: 0,
-            },
+              service_role_configured: true,
+            }
+          : prev,
       );
       await loadStatus();
       toast.success("Credenciais salvas — agora clique em Conectar conta");
@@ -574,7 +630,7 @@ export function BlingPageView({
                 Cadastre a URL de callback no painel Bling.
               </>
             )}
-            {credentialsReady && !status?.service_role_configured && (
+            {credentialsReady && !serviceRoleReady && (
               <>
                 {" "}
                 Credenciais salvas. Falta configurar{" "}

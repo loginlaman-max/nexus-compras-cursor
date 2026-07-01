@@ -3,7 +3,7 @@ import {
   getBlingCredentialsForOrg,
   resolveBlingRedirectUri,
 } from "@/lib/bling/org-credentials";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createAdminClient, isAdminClientConfigured } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 async function assertMember(orgId: string, userId: string) {
@@ -41,6 +41,7 @@ export async function GET(request: Request) {
   }
 
   const redirectUri = resolveBlingRedirectUri(request);
+  const serviceRoleConfigured = isAdminClientConfigured();
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -59,6 +60,7 @@ export async function GET(request: Request) {
         redirect_uri: redirectUri,
         updated_at: data.updated_at,
         source: "org",
+        service_role_configured: true,
       });
     }
   } catch {
@@ -73,6 +75,7 @@ export async function GET(request: Request) {
       secret_set: true,
       redirect_uri: envCreds.redirectUri,
       source: "env",
+      service_role_configured: serviceRoleConfigured,
     });
   }
 
@@ -82,6 +85,7 @@ export async function GET(request: Request) {
     secret_set: false,
     redirect_uri: redirectUri,
     source: null,
+    service_role_configured: serviceRoleConfigured,
   });
 }
 

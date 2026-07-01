@@ -4,6 +4,7 @@ import {
   resolveBlingRedirectUri,
 } from "@/lib/bling/org-credentials";
 import { createClient } from "@/lib/supabase/server";
+import { isAdminClientConfigured } from "@/lib/supabase/admin";
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -80,7 +81,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     bling_configured: blingConfigured,
-    service_role_configured: !!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
+    service_role_configured: isAdminClientConfigured(),
     redirect_uri: creds?.redirectUri ?? resolveBlingRedirectUri(request),
     conexoes: conexoes.data ?? [],
     logs: logs.data ?? [],
