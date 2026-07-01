@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isBlingConfigured } from "@/lib/bling/config";
+import { getBlingCredentials, isBlingConfigured } from "@/lib/bling/config";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET(request: Request) {
@@ -56,8 +56,12 @@ export async function GET(request: Request) {
       (c) => c.status === "conectado",
     ).length ?? 0;
 
+  const creds = getBlingCredentials();
+
   return NextResponse.json({
     bling_configured: isBlingConfigured(),
+    service_role_configured: !!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
+    redirect_uri: creds?.redirectUri ?? null,
     conexoes: conexoes.data ?? [],
     logs: logs.data ?? [],
     totais: {

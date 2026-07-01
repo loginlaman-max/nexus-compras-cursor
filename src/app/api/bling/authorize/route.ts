@@ -44,6 +44,7 @@ export async function GET(request: Request) {
   const url = new URL(BLING_AUTH_URL);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", creds.clientId);
+  url.searchParams.set("redirect_uri", creds.redirectUri);
   url.searchParams.set("state", state);
 
   return NextResponse.redirect(url.toString());

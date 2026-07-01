@@ -6,8 +6,6 @@ import {
   Box,
   Check,
   Copy,
-  Eye,
-  EyeOff,
   FileDown,
   Gauge,
   Info,
@@ -15,11 +13,14 @@ import {
   LayoutDashboard,
   RefreshCw,
   Save,
+  ShieldCheck,
   Unplug,
   Webhook,
 } from "lucide-react";
 import { useCatalog } from "@/components/providers/catalog-provider";
 import { useOrg } from "@/components/providers/org-provider";
+import { SetDialog } from "@/components/sistema/configuracoes/config-shared";
+import { useFiliaisIntegracao } from "@/hooks/use-filiais-integracao";
 import {
   defaultWebhooks,
   defaultWhAcoes,
@@ -47,6 +48,8 @@ type TabId = (typeof TABS)[number]["id"];
 
 type BlingStatus = {
   bling_configured: boolean;
+  service_role_configured?: boolean;
+  redirect_uri?: string | null;
   conexoes: {
     filial_id: string;
     status: string;
@@ -168,20 +171,18 @@ export function BlingPageView({
 } = {}) {
   const { activeOrg } = useOrg();
   const { refresh: refreshCatalog } = useCatalog();
+  const { filiais, loading: filiaisLoading } = useFiliaisIntegracao();
   const demo = isDemoMode();
 
   const [tab, setTab] = useState<TabId>("visao");
   const [status, setStatus] = useState<BlingStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [showSecret, setShowSecret] = useState(false);
+  const [connectFilialId, setConnectFilialId] = useState("");
+  const [connectOpen, setConnectOpen] = useState(false);
 
   const [ents, setEnts] = useState<SyncEntidade[]>(() =>
     loadEnts(nxStore.get<Record<string, boolean> | null>("bling_sync", null)),
   );
-  const [cred, setCred] = useState(() => {
-    const saved = nxStore.get<Partial<typeof defaultCred>>("bling_cred", {});
-    return { ...defaultCred(), ...saved };
-  });
   const [webhooks, setWebhooks] = useState<Record<string, boolean>>(() => ({
     ...defaultWebhooks(),
     ...nxStore.get<Record<string, boolean>>("bling_webhooks", {}),
@@ -237,6 +238,11 @@ export function BlingPageView({
   const totalRegistros = displayEnts
     .filter((e) => e.on)
     .reduce((s, e) => s + e.registros, 0);
+
+  const serverReady =
+    !demo &&
+    !!status?.bling_configured &&
+    !!status?.service_role_configured;
 
   const toggleEnt = (id: string) => {
     setEnts((prev) => {
@@ -304,18 +310,32 @@ export function BlingPageView({
       onSaved?.("Modo demo — use Integrações para simular conexão");
       return;
     }
-    const filialId = primeira?.filial_id;
+    if (!status?.bling_configured) {
+      toast.error(
+        "Credenciais Bling não detectadas no servidor. Configure BLING_CLIENT_ID e BLING_CLIENT_SECRET na Vercel e faça redeploy.",
+      );
+      return;
+    }
+    if (!status?.service_role_configured) {
+      toast.error(
+        "SUPABASE_SERVICE_ROLE_KEY não configurada na Vercel. Necessária para salvar tokens após o OAuth.",
+      );
+      return;
+    }
+    const filialId =
+      primeira?.filial_id ??
+      filiais.find((f) => f.bling?.status !== "conectado")?.id ??
+      filiais[0]?.id;
     if (!filialId) {
-      toast.error("Nenhuma filial conectada — use Integrações para autorizar");
+      setConnectOpen(true);
       return;
     }
     window.location.href = `/api/bling/authorize?org_id=${encodeURIComponent(activeOrg.orgId)}&filial_id=${encodeURIComponent(filialId)}`;
   };
 
-  const saveCred = () => {
-    nxStore.set("bling_cred", cred);
-    onSaved?.("Credenciais salvas");
-    toast.success("Credenciais salvas localmente");
+  const startOAuth = (filialId: string) => {
+    if (!filialId) return;
+    window.location.href = `/api/bling/authorize?org_id=${encodeURIComponent(activeOrg.orgId)}&filial_id=${encodeURIComponent(filialId)}`;
   };
 
   const saveWebhooks = () => {
@@ -405,10 +425,64 @@ export function BlingPageView({
             </span>
           </div>
         </div>
-        <button type="button" className="btn btn-secondary" onClick={reconnect}>
-          <Unplug className="size-3.5" /> Reconectar
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={reconnect}
+        >
+          <Unplug className="size-3.5" />{" "}
+          {conectado ? "Reconectar" : "Conectar conta"}
         </button>
       </div>
+
+      {!demo && status && !conectado && (
+        <div
+          className="card"
+          style={{
+            marginTop: 14,
+            padding: "14px 16px",
+            borderColor: serverReady
+              ? "hsl(var(--status-baixo) / 0.35)"
+              : "hsl(var(--destructive) / 0.35)",
+          }}
+        >
+          <p className="type-caption" style={{ margin: 0, lineHeight: 1.5 }}>
+            <strong>Como conectar na Vercel:</strong>
+            {!status.bling_configured && (
+              <>
+                {" "}
+                1) Adicione <code>BLING_CLIENT_ID</code> e{" "}
+                <code>BLING_CLIENT_SECRET</code> nas Environment Variables e
+                faça redeploy.
+              </>
+            )}
+            {status.bling_configured && !status.service_role_configured && (
+              <>
+                {" "}
+                1) Adicione <code>SUPABASE_SERVICE_ROLE_KEY</code> na Vercel
+                (Settings → API → service_role).
+              </>
+            )}
+            {serverReady && (
+              <>
+                {" "}
+                1) Cadastre a URL de callback no painel Bling. 2) Clique em{" "}
+                <strong>Conectar conta</strong>, escolha a filial e autorize no
+                site do Bling. O botão &quot;Salvar credenciais&quot;{" "}
+                <em>não</em> configura o servidor — use as variáveis na Vercel.
+              </>
+            )}
+          </p>
+          {status.redirect_uri && (
+            <p
+              className="type-caption mono"
+              style={{ margin: "8px 0 0", fontSize: 11 }}
+            >
+              Callback servidor: {status.redirect_uri}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="nx-bling-tabs">
         {TABS.map((t) => {
@@ -739,57 +813,64 @@ export function BlingPageView({
       {tab === "credenciais" && (
         <div className="card nx-bling-cred" style={{ maxWidth: 720 }}>
           <div className="nx-set-cardhead">Credenciais do Aplicativo Bling</div>
+          <p
+            className="type-caption"
+            style={{ margin: 0, padding: "12px 16px", lineHeight: 1.5 }}
+          >
+            {status?.bling_configured ? (
+              <>
+                Credenciais detectadas no servidor (variáveis de ambiente).
+                Status:{" "}
+                <span className="pill pill-ok" style={{ fontSize: 10 }}>
+                  Configurado
+                </span>
+              </>
+            ) : (
+              <>
+                Credenciais <strong>não detectadas</strong> no servidor.
+                Configure na Vercel: <code>BLING_CLIENT_ID</code>,{" "}
+                <code>BLING_CLIENT_SECRET</code>,{" "}
+                <code>BLING_REDIRECT_URI</code>.
+              </>
+            )}
+          </p>
           <div className="nx-bling-cred-grid">
             <div className="nx-set-field">
-              <label>Client ID</label>
+              <label>Client ID (servidor)</label>
               <input
+                readOnly
                 value={
-                  status?.bling_configured && !demo
-                    ? cred.clientId || "••••••••••••••••••••"
-                    : cred.clientId
-                }
-                readOnly={status?.bling_configured && !demo}
-                onChange={(e) =>
-                  setCred((c) => ({ ...c, clientId: e.target.value }))
+                  status?.bling_configured
+                    ? "Configurado na Vercel ✓"
+                    : "Não configurado"
                 }
               />
             </div>
             <div className="nx-set-field">
-              <label>Client Secret</label>
-              <div className="nx-bling-secret">
-                <input
-                  type={showSecret ? "text" : "password"}
-                  value={
-                    status?.bling_configured && !demo
-                      ? cred.clientSecret || "••••••••••••••••••••"
-                      : cred.clientSecret
-                  }
-                  readOnly={status?.bling_configured && !demo}
-                  onChange={(e) =>
-                    setCred((c) => ({ ...c, clientSecret: e.target.value }))
-                  }
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowSecret((s) => !s)}
-                  title={showSecret ? "Ocultar" : "Mostrar"}
-                >
-                  {showSecret ? (
-                    <EyeOff className="size-3.5" />
-                  ) : (
-                    <Eye className="size-3.5" />
-                  )}
-                </button>
-              </div>
+              <label>Client Secret (servidor)</label>
+              <input
+                readOnly
+                type="password"
+                value={
+                  status?.bling_configured
+                    ? "••••••••••••••••••••"
+                    : "Não configurado"
+                }
+              />
             </div>
             <div className="nx-set-field full">
               <label>URL de Redirecionamento (OAuth callback)</label>
               <div className="nx-bling-secret">
-                <input readOnly value={redirectUri} />
+                <input
+                  readOnly
+                  value={status?.redirect_uri ?? redirectUri}
+                />
                 <button
                   type="button"
                   title="Copiar"
-                  onClick={() => copyText(redirectUri, onSaved)}
+                  onClick={() =>
+                    copyText(status?.redirect_uri ?? redirectUri, onSaved)
+                  }
                 >
                   <Copy className="size-3.5" />
                 </button>
@@ -803,20 +884,16 @@ export function BlingPageView({
                 style={{ verticalAlign: -2, marginRight: 4 }}
               />
               Cadastre esta URL no painel do Bling em{" "}
-              <code>Aplicativos → OAuth</code>.
+              <code>Aplicativos → OAuth</code>. Depois use{" "}
+              <strong>Conectar conta</strong> (não &quot;Salvar&quot;).
             </span>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" className="btn btn-ghost">
-                Cancelar
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary-blue"
-                onClick={saveCred}
-              >
-                <Save className="size-3.5" /> SALVAR CREDENCIAIS
-              </button>
-            </div>
+            <button
+              type="button"
+              className="btn btn-primary-blue"
+              onClick={reconnect}
+            >
+              <ShieldCheck className="size-3.5" /> CONECTAR VIA OAUTH
+            </button>
           </div>
         </div>
       )}
@@ -945,14 +1022,52 @@ export function BlingPageView({
           </div>
         </div>
       )}
+
+      {connectOpen && (
+        <SetDialog
+          title="Conectar conta Bling"
+          onClose={() => setConnectOpen(false)}
+          onSave={
+            connectFilialId
+              ? () => startOAuth(connectFilialId)
+              : null
+          }
+          saveLabel="Autorizar no Bling →"
+          saveDisabled={!connectFilialId}
+        >
+          <p
+            style={{
+              margin: "0 0 14px",
+              fontSize: 13,
+              color: "hsl(var(--muted-foreground))",
+            }}
+          >
+            Selecione a filial e autorize via OAuth no site do Bling.
+          </p>
+          <div className="nx-set-field">
+            <label>Filial a vincular</label>
+            <select
+              className="nx-mf-select"
+              style={{ width: "100%" }}
+              value={connectFilialId}
+              onChange={(e) => setConnectFilialId(e.target.value)}
+            >
+              <option value="">
+                {filiaisLoading
+                  ? "Carregando filiais…"
+                  : filiais.length === 0
+                    ? "Nenhuma filial cadastrada"
+                    : "Selecione a filial…"}
+              </option>
+              {filiais.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.nome} · {f.uf}
+                </option>
+              ))}
+            </select>
+          </div>
+        </SetDialog>
+      )}
     </div>
   );
-}
-
-function defaultCred() {
-  return {
-    clientId: "a1b2c3d4e5f6g7h8i9j0",
-    clientSecret: "sk_live_8x7w6v5u4t3s2r1q0p",
-    redirect: "",
-  };
 }
