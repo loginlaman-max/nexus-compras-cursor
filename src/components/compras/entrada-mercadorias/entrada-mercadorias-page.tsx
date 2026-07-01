@@ -45,6 +45,7 @@ import { pushHistoricoExport } from "@/lib/entrada/hn-data";
 import { uploadNfeXml } from "@/lib/entrada/nfe-api";
 import { nxStore } from "@/lib/store/nx-store";
 import { useOrg } from "@/components/providers/org-provider";
+import { toast } from "sonner";
 
 const STEP_ICONS: Record<string, LucideIcon> = {
   "file-down": FileDown,
@@ -84,6 +85,7 @@ export function EntradaMercadoriasPageView() {
   const [extraNotas, setExtraNotas] = useState<EmNota[]>(() =>
     nxStore.get("em_extra_notas", []),
   );
+  const [xmlLoading, setXmlLoading] = useState(false);
 
   const allNotas = useMemo(
     () => [...EM_NOTAS, ...EM_NOTAS_ORFAS, ...extraNotas],
@@ -245,8 +247,46 @@ export function EntradaMercadoriasPageView() {
 
   const handleXmlUpload = useCallback(
     async (files: FileList) => {
-      if (activeOrg?.orgId && files[0]) {
-        await uploadNfeXml(activeOrg.orgId, files[0]);
+      const file = files[0];
+      if (!file) return;
+
+      setXmlLoading(true);
+      try {
+        const orgId = activeOrg?.orgId ?? "local";
+        const result = await uploadNfeXml(orgId, file);
+
+        if (result.error && !result.nota) {
+          toast.error(result.error);
+          return;
+        }
+
+        const nota = result.nota;
+        if (!nota) {
+          toast.error("Não foi possível interpretar o XML");
+          return;
+        }
+
+        setExtraNotas((prev) => {
+          const next = [nota, ...prev.filter((n) => n.id !== nota.id)];
+          nxStore.set("em_extra_notas", next);
+          return next;
+        });
+        setNotaId(nota.id);
+        setStep(0);
+
+        if (result.error) {
+          toast.warning(
+            `NF-e ${nota.nf} carregada localmente. Servidor: ${result.error}`,
+          );
+        } else if (result.persisted) {
+          toast.success(`NF-e ${nota.nf} importada e salva no Supabase`);
+        } else {
+          toast.success(`NF-e ${nota.nf} carregada · ${nota.items.length} itens`);
+        }
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Falha ao importar XML");
+      } finally {
+        setXmlLoading(false);
       }
     },
     [activeOrg?.orgId],
@@ -338,6 +378,7 @@ export function EntradaMercadoriasPageView() {
             onAvulsa={vincularAvulsa}
             onDesvincular={desvincular}
             onXmlUpload={handleXmlUpload}
+            xmlLoading={xmlLoading}
           />
         )}
         {step === 1 && notaEf && m && (

@@ -94,6 +94,7 @@ interface EmEntradaProps {
   onAvulsa: () => void;
   onDesvincular: () => void;
   onXmlUpload: (files: FileList) => void;
+  xmlLoading?: boolean;
 }
 
 export function EmEntrada({
@@ -106,6 +107,7 @@ export function EmEntrada({
   onAvulsa,
   onDesvincular,
   onXmlUpload,
+  xmlLoading = false,
 }: EmEntradaProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const selNota = notas.find((n) => n.id === sel);
@@ -127,10 +129,21 @@ export function EmEntrada({
         <button
           type="button"
           className="nx-em-method is-primary"
+          disabled={xmlLoading}
           onClick={() => fileRef.current?.click()}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (xmlLoading) return;
+            if (e.dataTransfer.files?.length) onXmlUpload(e.dataTransfer.files);
+          }}
         >
           <FileUp className="size-[18px]" />
-          <b>Importar XML</b>
+          <b>{xmlLoading ? "Lendo XML…" : "Importar XML"}</b>
           <i>Arraste o XML da NF-e ou clique</i>
         </button>
         <button type="button" className="nx-em-method">
