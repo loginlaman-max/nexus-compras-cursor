@@ -1,5 +1,5 @@
-import { getBlingCredentials } from "@/lib/bling/config";
 import { decodeState, exchangeCode } from "@/lib/bling/oauth";
+import { getBlingCredentialsForOrg } from "@/lib/bling/org-credentials";
 import { blingConfigRedirect } from "@/lib/bling/redirect";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     return blingConfigRedirect(request, "erro", "state_invalido");
   }
 
-  const creds = getBlingCredentials();
+  const creds = await getBlingCredentialsForOrg(state.org_id, request);
   if (!creds) {
     return blingConfigRedirect(request, "erro", "bling_nao_configurado");
   }

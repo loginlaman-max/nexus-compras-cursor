@@ -6,6 +6,8 @@ import {
   Box,
   Check,
   Copy,
+  Eye,
+  EyeOff,
   FileDown,
   Gauge,
   Info,
@@ -177,8 +179,16 @@ export function BlingPageView({
   const [tab, setTab] = useState<TabId>("visao");
   const [status, setStatus] = useState<BlingStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [savingCred, setSavingCred] = useState(false);
+  const [showSecret, setShowSecret] = useState(false);
   const [connectFilialId, setConnectFilialId] = useState("");
   const [connectOpen, setConnectOpen] = useState(false);
+  const [appCred, setAppCred] = useState({
+    client_id: "",
+    client_secret: "",
+    secret_set: false,
+    redirect_uri: "",
+  });
 
   const [ents, setEnts] = useState<SyncEntidade[]>(() =>
     loadEnts(nxStore.get<Record<string, boolean> | null>("bling_sync", null)),
@@ -216,9 +226,29 @@ export function BlingPageView({
     if (res.ok) setStatus((await res.json()) as BlingStatus);
   }, [activeOrg.orgId, demo]);
 
+  const loadCredentials = useCallback(async () => {
+    if (demo) return;
+    const res = await fetch(
+      `/api/bling/credentials?org_id=${encodeURIComponent(activeOrg.orgId)}`,
+    );
+    if (!res.ok) return;
+    const data = (await res.json()) as {
+      client_id: string;
+      secret_set: boolean;
+      redirect_uri: string;
+    };
+    setAppCred((c) => ({
+      ...c,
+      client_id: data.client_id ?? "",
+      secret_set: !!data.secret_set,
+      redirect_uri: data.redirect_uri ?? "",
+    }));
+  }, [activeOrg.orgId, demo]);
+
   useEffect(() => {
     void loadStatus();
-  }, [loadStatus]);
+    void loadCredentials();
+  }, [loadStatus, loadCredentials]);
 
   const displayEnts = useMemo(
     () => mergeEntsFromApi(ents, status, demo),
@@ -312,8 +342,9 @@ export function BlingPageView({
     }
     if (!status?.bling_configured) {
       toast.error(
-        "Credenciais Bling não detectadas no servidor. Configure BLING_CLIENT_ID e BLING_CLIENT_SECRET na Vercel e faça redeploy.",
+        "Salve o Client ID e Client Secret na aba Credenciais antes de conectar.",
       );
+      setTab("credenciais");
       return;
     }
     if (!status?.service_role_configured) {
@@ -336,6 +367,48 @@ export function BlingPageView({
   const startOAuth = (filialId: string) => {
     if (!filialId) return;
     window.location.href = `/api/bling/authorize?org_id=${encodeURIComponent(activeOrg.orgId)}&filial_id=${encodeURIComponent(filialId)}`;
+  };
+
+  const saveAppCredentials = async () => {
+    if (demo) {
+      toast.info("Modo demo — credenciais não são persistidas");
+      return;
+    }
+    if (!appCred.client_id.trim()) {
+      toast.error("Informe o Client ID");
+      return;
+    }
+    if (!appCred.client_secret.trim() && !appCred.secret_set) {
+      toast.error("Informe o Client Secret");
+      return;
+    }
+    setSavingCred(true);
+    try {
+      const res = await fetch("/api/bling/credentials", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          org_id: activeOrg.orgId,
+          client_id: appCred.client_id.trim(),
+          client_secret: appCred.client_secret.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Falha ao salvar");
+      setAppCred((c) => ({
+        ...c,
+        client_secret: "",
+        secret_set: true,
+        redirect_uri: data.redirect_uri ?? c.redirect_uri,
+      }));
+      await loadStatus();
+      toast.success("Credenciais salvas — agora clique em Conectar conta");
+      onSaved?.("Credenciais Bling salvas");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao salvar");
+    } finally {
+      setSavingCred(false);
+    }
   };
 
   const saveWebhooks = () => {
@@ -447,38 +520,37 @@ export function BlingPageView({
           }}
         >
           <p className="type-caption" style={{ margin: 0, lineHeight: 1.5 }}>
-            <strong>Como conectar na Vercel:</strong>
+            <strong>Como conectar:</strong>
             {!status.bling_configured && (
               <>
                 {" "}
-                1) Adicione <code>BLING_CLIENT_ID</code> e{" "}
-                <code>BLING_CLIENT_SECRET</code> nas Environment Variables e
-                faça redeploy.
+                1) Preencha <strong>Client ID</strong> e <strong>Client Secret</strong>{" "}
+                na aba Credenciais (app criado em developer.bling.com.br). 2)
+                Cadastre a URL de callback no painel Bling.
               </>
             )}
             {status.bling_configured && !status.service_role_configured && (
               <>
                 {" "}
-                1) Adicione <code>SUPABASE_SERVICE_ROLE_KEY</code> na Vercel
-                (Settings → API → service_role).
+                Credenciais salvas. Falta configurar{" "}
+                <code>SUPABASE_SERVICE_ROLE_KEY</code> na Vercel (suporte da
+                plataforma).
               </>
             )}
             {serverReady && (
               <>
                 {" "}
-                1) Cadastre a URL de callback no painel Bling. 2) Clique em{" "}
-                <strong>Conectar conta</strong>, escolha a filial e autorize no
-                site do Bling. O botão &quot;Salvar credenciais&quot;{" "}
-                <em>não</em> configura o servidor — use as variáveis na Vercel.
+                Credenciais OK. Clique em <strong>Conectar conta</strong>,
+                escolha a filial e autorize no site do Bling.
               </>
             )}
           </p>
-          {status.redirect_uri && (
+          {(appCred.redirect_uri || status.redirect_uri) && (
             <p
               className="type-caption mono"
               style={{ margin: "8px 0 0", fontSize: 11 }}
             >
-              Callback servidor: {status.redirect_uri}
+              Callback OAuth: {appCred.redirect_uri || status.redirect_uri}
             </p>
           )}
         </div>
@@ -817,59 +889,87 @@ export function BlingPageView({
             className="type-caption"
             style={{ margin: 0, padding: "12px 16px", lineHeight: 1.5 }}
           >
-            {status?.bling_configured ? (
+            Cada assinante usa o próprio app OAuth no{" "}
+            <a
+              href="https://developer.bling.com.br"
+              target="_blank"
+              rel="noreferrer"
+            >
+              developer.bling.com.br
+            </a>
+            . Cole aqui o Client ID e Secret do seu aplicativo.
+            {status?.bling_configured && (
               <>
-                Credenciais detectadas no servidor (variáveis de ambiente).
-                Status:{" "}
+                {" "}
                 <span className="pill pill-ok" style={{ fontSize: 10 }}>
-                  Configurado
+                  Salvo
                 </span>
-              </>
-            ) : (
-              <>
-                Credenciais <strong>não detectadas</strong> no servidor.
-                Configure na Vercel: <code>BLING_CLIENT_ID</code>,{" "}
-                <code>BLING_CLIENT_SECRET</code>,{" "}
-                <code>BLING_REDIRECT_URI</code>.
               </>
             )}
           </p>
           <div className="nx-bling-cred-grid">
             <div className="nx-set-field">
-              <label>Client ID (servidor)</label>
+              <label>Client ID</label>
               <input
-                readOnly
-                value={
-                  status?.bling_configured
-                    ? "Configurado na Vercel ✓"
-                    : "Não configurado"
+                value={appCred.client_id}
+                onChange={(e) =>
+                  setAppCred((c) => ({ ...c, client_id: e.target.value }))
                 }
+                placeholder="Do painel Bling → seu aplicativo"
               />
             </div>
             <div className="nx-set-field">
-              <label>Client Secret (servidor)</label>
-              <input
-                readOnly
-                type="password"
-                value={
-                  status?.bling_configured
-                    ? "••••••••••••••••••••"
-                    : "Não configurado"
-                }
-              />
+              <label>Client Secret</label>
+              <div className="nx-bling-secret">
+                <input
+                  type={showSecret ? "text" : "password"}
+                  value={appCred.client_secret}
+                  onChange={(e) =>
+                    setAppCred((c) => ({
+                      ...c,
+                      client_secret: e.target.value,
+                    }))
+                  }
+                  placeholder={
+                    appCred.secret_set
+                      ? "Deixe em branco para manter o atual"
+                      : "Do painel Bling → seu aplicativo"
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSecret((s) => !s)}
+                  title={showSecret ? "Ocultar" : "Mostrar"}
+                >
+                  {showSecret ? (
+                    <EyeOff className="size-3.5" />
+                  ) : (
+                    <Eye className="size-3.5" />
+                  )}
+                </button>
+              </div>
             </div>
             <div className="nx-set-field full">
               <label>URL de Redirecionamento (OAuth callback)</label>
               <div className="nx-bling-secret">
                 <input
                   readOnly
-                  value={status?.redirect_uri ?? redirectUri}
+                  value={
+                    appCred.redirect_uri ||
+                    status?.redirect_uri ||
+                    redirectUri
+                  }
                 />
                 <button
                   type="button"
                   title="Copiar"
                   onClick={() =>
-                    copyText(status?.redirect_uri ?? redirectUri, onSaved)
+                    copyText(
+                      appCred.redirect_uri ||
+                        status?.redirect_uri ||
+                        redirectUri,
+                      onSaved,
+                    )
                   }
                 >
                   <Copy className="size-3.5" />
@@ -883,17 +983,28 @@ export function BlingPageView({
                 className="size-3"
                 style={{ verticalAlign: -2, marginRight: 4 }}
               />
-              Cadastre esta URL no painel do Bling em{" "}
-              <code>Aplicativos → OAuth</code>. Depois use{" "}
-              <strong>Conectar conta</strong> (não &quot;Salvar&quot;).
+              Cadastre a URL acima no Bling em{" "}
+              <code>Aplicativos → OAuth</code>, salve aqui e depois{" "}
+              <strong>Conectar conta</strong>.
             </span>
-            <button
-              type="button"
-              className="btn btn-primary-blue"
-              onClick={reconnect}
-            >
-              <ShieldCheck className="size-3.5" /> CONECTAR VIA OAUTH
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-primary-blue"
+                disabled={savingCred}
+                onClick={() => void saveAppCredentials()}
+              >
+                <Save className="size-3.5" />{" "}
+                {savingCred ? "Salvando…" : "SALVAR CREDENCIAIS"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={reconnect}
+              >
+                <ShieldCheck className="size-3.5" /> CONECTAR VIA OAUTH
+              </button>
+            </div>
           </div>
         </div>
       )}

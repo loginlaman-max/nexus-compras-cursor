@@ -16,10 +16,24 @@ export async function ensureAccessToken(
   supabase: Supa,
   conn: BlingConn,
 ): Promise<string> {
-  const clientId = Deno.env.get("BLING_CLIENT_ID");
-  const clientSecret = Deno.env.get("BLING_CLIENT_SECRET");
+  let clientId = Deno.env.get("BLING_CLIENT_ID");
+  let clientSecret = Deno.env.get("BLING_CLIENT_SECRET");
+
+  const { data: appCreds } = await supabase
+    .from("bling_app_credentials")
+    .select("client_id, client_secret")
+    .eq("org_id", conn.org_id)
+    .maybeSingle();
+
+  if (appCreds?.client_id && appCreds?.client_secret) {
+    clientId = String(appCreds.client_id);
+    clientSecret = String(appCreds.client_secret);
+  }
+
   if (!clientId || !clientSecret) {
-    throw new Error("BLING_CLIENT_ID/SECRET não configurados na edge function");
+    throw new Error(
+      "Credenciais Bling não configuradas para esta organização",
+    );
   }
   if (!conn.access_token) throw new Error("Sem access_token");
 

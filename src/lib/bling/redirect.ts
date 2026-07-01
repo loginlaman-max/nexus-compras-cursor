@@ -13,7 +13,8 @@ export function blingConfigRedirect(
 }
 
 export const BLING_CALLBACK_MESSAGES: Record<string, string> = {
-  bling_nao_configurado: "Não foi possível conectar ao Bling. Tente novamente.",
+  bling_nao_configurado:
+    "Cadastre Client ID e Client Secret na aba Credenciais antes de conectar.",
   callback_incompleto: "Autorização incompleta. Tente novamente.",
   state_invalido: "Sessão de autorização inválida. Tente novamente.",
   parametros_invalidos:
