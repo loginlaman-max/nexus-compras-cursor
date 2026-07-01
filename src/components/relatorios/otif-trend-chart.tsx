@@ -41,18 +41,6 @@ export function OtifTrendChart({ trend = otifTrend() }: OtifTrendChartProps) {
       .map((d, i) => (i ? "L" : "M") + " " + x(i).toFixed(1) + " " + y(d[key]).toFixed(1))
       .join(" ");
 
-  const areaOtif =
-    line("otif") +
-    " L" +
-    x(trend.length - 1).toFixed(1) +
-    " " +
-    y(min).toFixed(1) +
-    " L" +
-    x(0).toFixed(1) +
-    " " +
-    y(min).toFixed(1) +
-    " Z";
-
   const onMove = (e: React.MouseEvent) => {
     const r = wrapRef.current?.getBoundingClientRect();
     if (!r) return;
@@ -93,7 +81,6 @@ export function OtifTrendChart({ trend = otifTrend() }: OtifTrendChartProps) {
             </g>
           );
         })}
-        <path d={areaOtif} fill="hsl(var(--primary) / 0.08)" stroke="none" />
         <path
           d={line("inf")}
           fill="none"

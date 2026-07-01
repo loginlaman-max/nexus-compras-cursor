@@ -12,6 +12,7 @@ import { AfBarList } from "@/components/ferramentas/af-bar-list";
 import { AfDonut } from "@/components/ferramentas/af-donut";
 import { AfWaterfall } from "@/components/ferramentas/af-waterfall";
 import { RelBanner } from "@/components/rel/rel-banner";
+import { useCatalog } from "@/components/providers/catalog-provider";
 import { fmtCompactBRL } from "@/lib/format";
 import {
   afAtividade,
@@ -56,13 +57,14 @@ function AfFeedRow({ e }: { e: AfActivityEvent }) {
 }
 
 export function AnaliseFinanceiraPageView() {
+  const { loaded } = useCatalog();
   const [despPct, setDespPct] = useState("8");
   const [impPct, setImpPct] = useState("12");
 
   const dPct = Math.max(0, afNum(despPct));
   const iPct = Math.max(0, afNum(impPct));
 
-  const base = useMemo(() => afComputeBase("matriz"), []);
+  const base = useMemo(() => afComputeBase("matriz"), [loaded]);
 
   const { faturamento, custoTotal } = base;
   const despesas = (faturamento * dPct) / 100;

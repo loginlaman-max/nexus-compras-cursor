@@ -7,6 +7,7 @@ import {
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
+import { useCatalog } from "@/components/providers/catalog-provider";
 import { RelShell } from "@/components/rel/rel-shell";
 import type { RelColumn } from "@/components/rel/rel-table";
 import {
@@ -70,6 +71,14 @@ function VarBadge({ v }: { v: number }) {
 
 function IndiceChart() {
   const data = precoIndice();
+  if (!data.length) {
+    return (
+      <p className="type-caption py-8 text-center text-muted-foreground">
+        Sem histórico de preços — dados aparecerão após compras registradas no
+        ERP.
+      </p>
+    );
+  }
   const [hover, setHover] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const W = 900;
@@ -254,7 +263,8 @@ const COLS: RelColumn<HistoricoPrecoRow & Record<string, unknown>>[] = [
 ];
 
 export function HistoricoPrecosPageView() {
-  const rows = useMemo(() => historicoPrecos(), []);
+  const { loaded } = useCatalog();
+  const rows = useMemo(() => historicoPrecos(), [loaded]);
   const subiram = rows.filter((r) => r.var12 > 0.5).length;
   const cairam = rows.filter((r) => r.var12 < -0.5).length;
 
@@ -301,7 +311,11 @@ export function HistoricoPrecosPageView() {
         subtitle={`Variação de custo de compra · ${subiram} subiram · ${cairam} caíram (12m)`}
         cards={cards}
         defaultCard="todos"
-        perPage={15}
+        perPage={12}
+        layout="listpage"
+        tableTitle="Histórico de preços por SKU"
+        unitLabel="SKUs"
+        searchPlaceholder="Pesquisar SKU, produto ou fornecedor"
         cols={COLS}
         rows={rows as (HistoricoPrecoRow & Record<string, unknown>)[]}
         csv

@@ -6,6 +6,7 @@ import { PedidoDetail } from "@/components/compras/pedido-detail";
 import { NxIcon } from "@/components/nx/nx-icon";
 import { RelShell } from "@/components/rel/rel-shell";
 import type { RelColumn } from "@/components/rel/rel-table";
+import { usePedidosCompra } from "@/hooks/use-pedidos-compra";
 import {
   getAllPedidos,
   statusEfetivo,
@@ -28,6 +29,7 @@ function PedStatusPill({ st }: { st: string }) {
 }
 
 export function PedidosComprasPageView() {
+  const { pedidos: remotePedidos, loading } = usePedidosCompra();
   const [pedido, setPedido] = useState<PedidoCompra | null>(null);
   const [tick, setTick] = useState(0);
   const [decisions, setDecisions] = useState<Record<string, PedidoDecisao>>({});
@@ -56,8 +58,8 @@ export function PedidosComprasPageView() {
 
   const rows = useMemo((): PedidoRow[] => {
     void tick;
-    return getAllPedidos() as PedidoRow[];
-  }, [tick]);
+    return getAllPedidos(remotePedidos) as PedidoRow[];
+  }, [tick, remotePedidos]);
 
   const stOf = useCallback(
     (p: PedidoCompra) => statusEfetivo(p, decisions),

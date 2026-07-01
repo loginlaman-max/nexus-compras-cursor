@@ -2,24 +2,21 @@
 
 import { useMemo, useState } from "react";
 import { Download, Search, Target, Truck } from "lucide-react";
-import { OtifGauge, otifColor } from "@/components/relatorios/otif-gauge";
+import { useCatalog } from "@/components/providers/catalog-provider";
+import { otifColor } from "@/components/relatorios/otif-gauge";
 import { OtifTrendChart } from "@/components/relatorios/otif-trend-chart";
+import { TablePager } from "@/components/rel/table-pager";
+import { usePager } from "@/hooks/use-pager";
 import {
   filtrarPedidosOtifPorPeriodo,
+  getPedidosOtif,
   otifGeral,
   otifPorFornecedor,
-  otifTrendForPeriod,
+  otifTrend,
 } from "@/lib/catalog";
 
 const PERIODOS = ["7 dias", "30 dias", "90 dias", "12 meses"] as const;
 type PeriodoOtif = (typeof PERIODOS)[number];
-
-const CHART_TITULO: Record<PeriodoOtif, string> = {
-  "7 dias": "Evolução OTIF · últimos 7 dias",
-  "30 dias": "Evolução OTIF · últimos 30 dias",
-  "90 dias": "Evolução OTIF · últimos 3 meses",
-  "12 meses": "Evolução OTIF · últimos 12 meses",
-};
 
 function pct(n: number) {
   return (
@@ -31,6 +28,7 @@ function pct(n: number) {
 }
 
 export function OtifPageView() {
+  const { loaded } = useCatalog();
   const [q, setQ] = useState("");
   const [periodo, setPeriodo] = useState<PeriodoOtif>("30 dias");
 
@@ -38,19 +36,22 @@ export function OtifPageView() {
     () => filtrarPedidosOtifPorPeriodo(periodo),
     [periodo],
   );
+  const pedidosTabela = useMemo(() => getPedidosOtif(), [loaded]);
   const forn = useMemo(
-    () => otifPorFornecedor(pedidosFiltrados),
-    [pedidosFiltrados],
+    () =>
+      otifPorFornecedor(pedidosTabela).filter((r) => r.pedidos > 0),
+    [pedidosTabela],
   );
   const G = useMemo(() => otifGeral(pedidosFiltrados), [pedidosFiltrados]);
-  const trend = useMemo(
-    () => otifTrendForPeriod(pedidosFiltrados, periodo),
-    [pedidosFiltrados, periodo],
-  );
+  const trend = useMemo(() => otifTrend(pedidosTabela), [pedidosTabela]);
 
   const rows = forn.filter(
-    (r) => !q || r.nome.toLowerCase().includes(q.toLowerCase()),
+    (r) =>
+      !q ||
+      r.nome.toLowerCase().includes(q.toLowerCase()) ||
+      r.cnpj.includes(q),
   );
+  const pager = usePager(rows, 12);
   const nForn = forn.length;
 
   const kpiCards = [
@@ -80,7 +81,7 @@ export function OtifPageView() {
     },
     {
       id: "otif",
-      label: "OTIF · " + periodo,
+      label: "OTIF · período",
       value: pct(G.otif),
       sub: "On Time × In Full",
       hero: true,
@@ -88,7 +89,7 @@ export function OtifPageView() {
   ];
 
   return (
-    <div className="nx-otif nx-listpage">
+    <div className="nx-rel nx-otif nx-listpage">
       <div className="nx-rel-banner">
         <div className="nx-rel-banner-icon">
           <Target className="size-5" />
@@ -106,7 +107,10 @@ export function OtifPageView() {
                 key={p}
                 type="button"
                 className={periodo === p ? "is-active" : ""}
-                onClick={() => setPeriodo(p)}
+                onClick={() => {
+                  setPeriodo(p);
+                  pager.reset();
+                }}
               >
                 {p}
               </button>
@@ -119,31 +123,16 @@ export function OtifPageView() {
       </div>
 
       <div className="nx-rel-cards is-static">
-        {kpiCards.map((c) =>
-          c.hero ? (
-            <div key={c.id} className="nx-rel-card is-active is-total">
-              <div className="nx-otif-hero" style={{ padding: 0 }}>
-                <div>
-                  <div className="nx-rel-card-label">{c.label}</div>
-                  <div
-                    className="nx-otif-heroval"
-                    style={{ color: otifColor(G.otif) }}
-                  >
-                    {c.value}
-                  </div>
-                  <div className="nx-otif-formula">{c.sub}</div>
-                </div>
-                <OtifGauge value={G.otif} />
-              </div>
-            </div>
-          ) : (
-            <div key={c.id} className="nx-rel-card">
-              <div className="nx-rel-card-label">{c.label}</div>
-              <div className="nx-rel-card-value">{c.value}</div>
-              <div className="nx-rel-card-sub">{c.sub}</div>
-            </div>
-          ),
-        )}
+        {kpiCards.map((c) => (
+          <div
+            key={c.id}
+            className={"nx-rel-card" + (c.hero ? " is-active is-total" : "")}
+          >
+            <div className="nx-rel-card-label">{c.label}</div>
+            <div className="nx-rel-card-value">{c.value}</div>
+            <div className="nx-rel-card-sub">{c.sub}</div>
+          </div>
+        ))}
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
@@ -158,7 +147,7 @@ export function OtifPageView() {
           }}
         >
           <h2 className="type-h2" style={{ margin: 0 }}>
-            {CHART_TITULO[periodo]}
+            Evolução OTIF · últimos 12 meses
           </h2>
           <div className="nx-legend" style={{ margin: 0 }}>
             <span>
@@ -177,18 +166,30 @@ export function OtifPageView() {
         </div>
       </div>
 
-      <div className="card nx-listpage-fill" style={{ marginTop: 14 }}>
+      <div className="card nx-listpage-fill mt-3.5">
         <div className="nx-cc-toolbar">
           <div className="nx-cc-tooltitle">
             <Truck className="size-[15px]" /> OTIF por fornecedor
           </div>
           <div style={{ flex: 1 }} />
+          <span
+            className="type-caption"
+            style={{
+              color: "hsl(var(--muted-foreground))",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {nForn} fornecedores
+          </span>
           <label className="field" style={{ width: 240 }}>
             <Search className="size-[13px] shrink-0 text-muted-foreground" />
             <input
               placeholder="Pesquisar fornecedor"
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => {
+                setQ(e.target.value);
+                pager.reset();
+              }}
             />
           </label>
         </div>
@@ -211,9 +212,9 @@ export function OtifPageView() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {pager.pageItems.map((r) => (
                 <tr key={r.cnpj}>
-                  <td style={{ fontWeight: 500 }}>{r.nome}</td>
+                  <td className="nx-otif-forn">{r.nome}</td>
                   <td
                     className="mono"
                     style={{ color: "hsl(var(--muted-foreground))" }}
@@ -259,23 +260,27 @@ export function OtifPageView() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={6}
-                    style={{
-                      textAlign: "center",
-                      color: "hsl(var(--muted-foreground))",
-                      padding: "24px 0",
-                    }}
-                  >
+                  <td colSpan={6} className="nx-rel-empty">
                     {q
                       ? `Nenhum fornecedor para "${q}"`
-                      : "Nenhum pedido no período selecionado"}
+                      : "Nenhum pedido avaliado no período"}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+        <TablePager
+          from={pager.from}
+          to={pager.to}
+          total={pager.total}
+          page={pager.page}
+          totalPages={pager.totalPages}
+          per={pager.per}
+          unitLabel="itens"
+          onPage={pager.setPage}
+          onPer={pager.setPer}
+        />
       </div>
     </div>
   );

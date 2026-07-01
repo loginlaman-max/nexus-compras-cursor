@@ -13,6 +13,7 @@ import {
   type HnNfeRow,
 } from "@/lib/entrada/hn-data";
 import { fetchHistoricoFromSupabase } from "@/lib/entrada/em-supabase";
+import { isDemoMode } from "@/lib/supabase/env";
 import { fmtBRL } from "@/lib/format";
 
 type NfeRow = HnNfeRow & Record<string, unknown>;
@@ -22,8 +23,9 @@ function mergeHistorico(
   remote: { nfes: HnNfeRow[]; ctes: HnCteRow[] },
   local: HnNfeRow[],
 ) {
+  const source = isDemoMode() ? [...local, ...remote.nfes] : remote.nfes;
   const byId = new Map<string, HnNfeRow>();
-  for (const n of [...local, ...remote.nfes]) {
+  for (const n of source) {
     byId.set(n.id, n);
   }
   const nfes = Array.from(byId.values()).sort(
@@ -40,17 +42,24 @@ export function HistoricoNotasPageView() {
     nfes: [],
     ctes: [],
   });
+  const [loading, setLoading] = useState(true);
   const isNfe = aba === "nfe";
 
   useEffect(() => {
-    if (!activeOrg?.orgId) return;
-    fetchHistoricoFromSupabase(activeOrg.orgId).then(setRemote);
+    if (!activeOrg?.orgId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetchHistoricoFromSupabase(activeOrg.orgId)
+      .then(setRemote)
+      .finally(() => setLoading(false));
   }, [activeOrg?.orgId]);
 
-  const { nfes, ctes } = useMemo(
-    () => mergeHistorico(remote, getLocalHistoricoExports()),
-    [remote],
-  );
+  const { nfes, ctes } = useMemo(() => {
+    const local = isDemoMode() ? getLocalHistoricoExports() : [];
+    return mergeHistorico(remote, local);
+  }, [remote]);
 
   const colsNfe: RelColumn<NfeRow>[] = [
     {
@@ -251,6 +260,10 @@ export function HistoricoNotasPageView() {
           subtitle="Notas fiscais de entrada processadas · situação, vínculo ao pedido e custo landed gerado"
           cards={cardsNfe}
           defaultCard="todos"
+          layout="listpage"
+          tableTitle="NF-e de entrada"
+          unitLabel="notas"
+          searchPlaceholder="Pesquisar NF, fornecedor ou CNPJ"
           cols={colsNfe}
           rows={nfes as NfeRow[]}
           csv
@@ -263,6 +276,10 @@ export function HistoricoNotasPageView() {
           subtitle="Conhecimentos de transporte (frete) processados · conciliação com as NF-e de entrada"
           cards={cardsCte}
           defaultCard="todos"
+          layout="listpage"
+          tableTitle="CT-e · frete"
+          unitLabel="CT-e"
+          searchPlaceholder="Pesquisar CT-e, transportadora ou NF vinculada"
           cols={colsCte}
           rows={ctes as CteRow[]}
           csv

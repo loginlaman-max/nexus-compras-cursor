@@ -152,6 +152,7 @@ function buildPrecNfes(): PrecNfe[] {
   Object.keys(byForn).forEach((fk, fi) => {
     const prods = byForn[fk];
     const forn = FORNECEDORES[fk as keyof typeof FORNECEDORES];
+    if (!prods?.length || !forn) return;
     const rng = precRng(5000 + fi * 131);
     const nNf = rng() < 0.45 ? 1 : 2;
     for (let n = 0; n < nNf; n++) {

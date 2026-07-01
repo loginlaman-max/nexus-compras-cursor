@@ -1,3 +1,13 @@
+import {
+  getLiveFiliais,
+  getLiveFiliaisOpcoes,
+} from "@/lib/catalog/runtime";
+import {
+  DEMO_FILIAIS,
+  DEMO_FILIAIS_OPCOES,
+} from "@/lib/demo/filiais-seed";
+import { isDemoMode } from "@/lib/supabase/env";
+
 export type FilialStatus = "conectado" | "erro" | "desativado" | "excluido";
 
 export interface Filial {
@@ -32,60 +42,29 @@ export const SEV_TOKEN: Record<Alerta["sev"], string> = {
   info: "--ring",
 };
 
-export const FILIAIS: Filial[] = [
-  {
-    id: "matriz",
-    nome: "Matriz PA",
-    uf: "PA",
-    cd: true,
-    bling: {
-      conta: "nexus-matriz",
-      status: "conectado",
-      sync: "há 5 min",
-      apiKey: "12.345.678/0001-90",
+function proxyArray<T extends object>(getter: () => T[]): T[] {
+  return new Proxy([] as T[], {
+    get(_target, prop) {
+      const arr = getter();
+      const val = Reflect.get(arr, prop, arr);
+      return typeof val === "function" ? val.bind(arr) : val;
     },
-  },
-  {
-    id: "pa",
-    nome: "Filial PA",
-    uf: "PA",
-    bling: {
-      conta: "nexus-pa",
-      status: "conectado",
-      sync: "há 12 min",
-      apiKey: "12.345.678/0002-70",
-    },
-  },
-  {
-    id: "sc",
-    nome: "Filial SC",
-    uf: "SC",
-    bling: {
-      conta: "nexus-sc",
-      status: "conectado",
-      sync: "há 8 min",
-      apiKey: "12.345.678/0003-51",
-    },
-  },
-  {
-    id: "sp",
-    nome: "Filial SP",
-    uf: "SP",
-    bling: {
-      conta: "nexus-sp",
-      status: "erro",
-      sync: "falha há 2h",
-      apiKey: "12.345.678/0004-32",
-    },
-  },
-];
+  });
+}
 
-export const FILIAIS_OPCOES: Filial[] = [
-  { id: "todas", nome: "Todas (consolidado)", consolidado: true },
-  ...FILIAIS,
-];
+export function getFiliais(): Filial[] {
+  return isDemoMode() ? DEMO_FILIAIS : getLiveFiliais();
+}
 
-export const ALERTAS: Alerta[] = [
+export function getFiliaisOpcoes(): Filial[] {
+  return isDemoMode() ? DEMO_FILIAIS_OPCOES : getLiveFiliaisOpcoes();
+}
+
+/** Em produção: filiais do Supabase/Bling. Em demo: seed local. */
+export const FILIAIS = proxyArray(getFiliais);
+export const FILIAIS_OPCOES = proxyArray(getFiliaisOpcoes);
+
+const DEMO_ALERTAS: Alerta[] = [
   {
     id: "rup-001",
     sev: "critico",
@@ -132,11 +111,15 @@ export const ALERTAS: Alerta[] = [
   },
 ];
 
+export const ALERTAS = proxyArray<Alerta>(() =>
+  isDemoMode() ? DEMO_ALERTAS : [],
+);
+
 export const TENANT = {
   nome: "Nexus Compras",
-  ultimaSync: "há 5 min",
+  ultimaSync: isDemoMode() ? "há 5 min" : "—",
   syncMode: "auto",
 };
 
 export const CART_COUNT = 0;
-export const APROVACOES_BADGE = 3;
+export const APROVACOES_BADGE = isDemoMode() ? 3 : 0;

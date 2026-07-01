@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 const PROJECT_REF =
   process.env.SUPABASE_PROJECT_ID?.trim() || "tajtzkavjoafelhltugo";
 
-const FUNCTIONS = ["parse-nfe", "parse-cte", "calc-custo-real"];
+const FUNCTIONS = ["parse-nfe", "parse-cte", "calc-custo-real", "bling-sync"];
 
 function loadEnvLocal() {
   const path = resolve(process.cwd(), ".env.local");

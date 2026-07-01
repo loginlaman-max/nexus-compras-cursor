@@ -1,4 +1,5 @@
 import { FILIAIS } from "@/lib/mock";
+import { isDemoMode } from "@/lib/supabase/env";
 import { cobertura, scopeProduto, sugerido, type Product } from "./index";
 import { PRODUTOS } from "./products-data";
 
@@ -50,6 +51,7 @@ export interface DrpSugestaoRow {
 }
 
 export function drpSugestoes(filialId: string): DrpSugestaoRow[] {
+  if (!isDemoMode()) return [];
   let target = filialId;
   if (!target || target === "matriz" || target === "todas") target = "pa";
   const fil = FILIAIS.find((f) => f.id === target);
@@ -111,6 +113,7 @@ export interface DrpDistribuicao {
 
 /** Distribuição de um SKU entre filiais (compra × transferência da Matriz). */
 export function drpDistribuicao(codInt: string): DrpDistribuicao | null {
+  if (!isDemoMode()) return null;
   const matrizP = PRODUTOS.find((x) => x.codInt === codInt);
   if (!matrizP) return null;
   const sobraTotal = Math.max(0, matrizP.est - (matrizP.eseg || 0));

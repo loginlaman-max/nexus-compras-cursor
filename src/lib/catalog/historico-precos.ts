@@ -1,4 +1,5 @@
-import { PRODUTOS } from "./products-data";
+import { getLiveProducts } from "./runtime";
+import { isDemoMode } from "@/lib/supabase/env";
 
 const MESES12 = [
   "Jul/25",
@@ -25,7 +26,7 @@ function mulberry32(seed: number) {
   };
 }
 
-function precoSerie(p: (typeof PRODUTOS)[0]) {
+function precoSerie(p: ReturnType<typeof getLiveProducts>[0]) {
   const rng = mulberry32(7000 + parseInt(p.codInt, 10));
   const base = p.custo;
   let cur = +(base * (0.86 + rng() * 0.12)).toFixed(2);
@@ -55,7 +56,8 @@ export interface HistoricoPrecoRow {
 }
 
 export function historicoPrecos(): HistoricoPrecoRow[] {
-  return PRODUTOS.map((p) => {
+  if (!isDemoMode()) return [];
+  return getLiveProducts().map((p) => {
     const serie = precoSerie(p);
     const precos = serie.map((s) => s.preco);
     const atual = precos[precos.length - 1];
@@ -80,7 +82,8 @@ export function historicoPrecos(): HistoricoPrecoRow[] {
 }
 
 export function precoIndice() {
-  const series = PRODUTOS.map(precoSerie);
+  if (!isDemoMode()) return [];
+  const series = getLiveProducts().map(precoSerie);
   return MESES12.map((m, i) => {
     const rel = series.map((s) => s[i].preco / s[0].preco);
     const idx = (rel.reduce((a, b) => a + b, 0) / rel.length) * 100;

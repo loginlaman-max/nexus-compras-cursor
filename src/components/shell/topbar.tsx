@@ -280,7 +280,7 @@ export function Topbar() {
         className="nx-tb-tenant nx-tb-tenant-link"
         title="Trocar organização"
       >
-        <div className="name">{activeOrg.org.nome}</div>
+        <div className="name">{activeOrg?.org?.nome ?? "—"}</div>
         <div className="meta">
           Última sync: {TENANT.ultimaSync} · <span className="hl">{TENANT.syncMode}</span>
         </div>

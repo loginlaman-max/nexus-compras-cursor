@@ -5,13 +5,14 @@ import { NxIcon } from "@/components/nx/nx-icon";
 import { RelBanner } from "@/components/rel/rel-banner";
 import { TablePager } from "@/components/rel/table-pager";
 import { usePager } from "@/hooks/use-pager";
+import { useCatalog } from "@/components/providers/catalog-provider";
 import { COMPRADORES } from "@/lib/catalog";
 import {
-  CC_DEPARTAMENTOS,
-  CC_FORNECEDORES,
-  type CarteiraDepRow,
-  type CarteiraFornRow,
-} from "@/lib/mock/carteira";
+  getCarteiraDepartamentos,
+  getCarteiraFornecedores,
+} from "@/lib/carteira/data";
+import type { CarteiraDepRow, CarteiraFornRow } from "@/lib/mock/carteira";
+import { nxStore } from "@/lib/store/nx-store";
 import { Users } from "lucide-react";
 
 function CcInlineComp({
@@ -159,15 +160,17 @@ function CcToggle({
 function VincularModal({
   mode,
   count,
+  depOptions,
   onSave,
   onClose,
 }: {
   mode: "bulk" | "dep";
   count?: number;
+  depOptions: string[];
   onSave: (payload: string | { dep: string; comp: string }) => void;
   onClose: () => void;
 }) {
-  const [dep, setDep] = useState("Cabo de Rede");
+  const [dep, setDep] = useState(depOptions[0] ?? "");
   const [comp, setComp] = useState("");
   const bulk = mode === "bulk";
 
@@ -189,7 +192,7 @@ function VincularModal({
             <CcSelect
               label="Departamento"
               value={dep}
-              options={CC_DEPARTAMENTOS.map((d) => d.nome)}
+              options={depOptions}
               onChange={setDep}
             />
           )}
@@ -295,40 +298,61 @@ type VincularState =
   | null;
 
 export function CarteiraCompradoresPageView() {
+  const { loaded } = useCatalog();
   const [tab, setTab] = useState<"fornecedores" | "departamentos">("fornecedores");
   const [q, setQ] = useState("");
   const [fs, setFs] = useState(false);
   const [vincular, setVincular] = useState<VincularState>(null);
   const [params, setParams] = useState<CarteiraFornRow | null>(null);
-  const [assign, setAssign] = useState<Record<string, string>>(() => {
-    const init: Record<string, string> = {};
-    CC_FORNECEDORES.forEach((r) => {
-      if (r.comprador && r.comprador !== "—") init[r._k] = r.comprador;
-    });
-    return init;
-  });
-  const [depAssign, setDepAssign] = useState<Record<string, string>>({});
+  const [assign, setAssign] = useState<Record<string, string>>(() =>
+    nxStore.get("cc_assign", {}),
+  );
+  const [depAssign, setDepAssign] = useState<Record<string, string>>(() =>
+    nxStore.get("cc_dep_assign", {}),
+  );
   const [sel, setSel] = useState<Set<string>>(() => new Set());
+
+  const fornecedores = useMemo(
+    () => getCarteiraFornecedores(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- recalcula quando catálogo carrega
+    [loaded],
+  );
+  const departamentos = useMemo(
+    () => getCarteiraDepartamentos(),
+    [loaded],
+  );
+  const depOptions = useMemo(
+    () => departamentos.map((d) => d.nome),
+    [departamentos],
+  );
+
+  useEffect(() => {
+    nxStore.set("cc_assign", assign);
+  }, [assign]);
+
+  useEffect(() => {
+    nxStore.set("cc_dep_assign", depAssign);
+  }, [depAssign]);
 
   const isForn = tab === "fornecedores";
 
   const fRows = useMemo(
     () =>
-      CC_FORNECEDORES.filter(
+      fornecedores.filter(
         (r) =>
           !q ||
           r.nome.toLowerCase().includes(q.toLowerCase()) ||
           r.id.includes(q),
       ),
-    [q],
+    [fornecedores, q],
   );
 
   const dRows = useMemo(
     () =>
-      CC_DEPARTAMENTOS.filter(
+      departamentos.filter(
         (r) => !q || r.nome.toLowerCase().includes(q.toLowerCase()),
       ),
-    [q],
+    [departamentos, q],
   );
 
   const fornPager = usePager(fRows, 12);
@@ -619,24 +643,24 @@ export function CarteiraCompradoresPageView() {
           )}
         </div>
 
-        {pager.total > 0 && (
-          <TablePager
-            from={pager.from}
-            to={pager.to}
-            total={pager.total}
-            page={pager.page}
-            totalPages={pager.totalPages}
-            per={pager.per}
-            onPage={pager.setPage}
-            onPer={pager.setPer}
-          />
-        )}
+        <TablePager
+          from={pager.from}
+          to={pager.to}
+          total={pager.total}
+          page={pager.page}
+          totalPages={pager.totalPages}
+          per={pager.per}
+          unitLabel={isForn ? "fornecedores" : "departamentos"}
+          onPage={pager.setPage}
+          onPer={pager.setPer}
+        />
       </div>
 
       {vincular?.mode === "bulk" && (
         <VincularModal
           mode="bulk"
           count={vincular.count}
+          depOptions={depOptions}
           onSave={(comp) => bulkAssign(comp as string)}
           onClose={() => setVincular(null)}
         />
@@ -644,9 +668,10 @@ export function CarteiraCompradoresPageView() {
       {vincular?.mode === "dep" && (
         <VincularModal
           mode="dep"
+          depOptions={depOptions}
           onSave={(payload) => {
             const { dep, comp } = payload as { dep: string; comp: string };
-            const d = CC_DEPARTAMENTOS.find((x) => x.nome === dep);
+            const d = departamentos.find((x) => x.nome === dep);
             if (d) setDepAssign((a) => ({ ...a, [d.id]: comp }));
           }}
           onClose={() => setVincular(null)}

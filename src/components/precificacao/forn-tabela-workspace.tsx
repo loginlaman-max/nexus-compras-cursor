@@ -20,7 +20,7 @@ import {
 import { toast } from "sonner";
 import {
   FT_ROLES,
-  FT_TABLES,
+  getFtTables,
   ftCellValue,
   ftRows,
   ftTableDef,
@@ -28,7 +28,7 @@ import {
   type FtColRole,
   type FtTableRow,
 } from "@/lib/precificacao/forn-tabelas-data";
-import { FORNECEDORES, type FornKey } from "@/lib/catalog";
+import { getFornecedor, type FornKey } from "@/lib/catalog";
 import { fmtBRL } from "@/lib/format";
 import { nxStore } from "@/lib/store/nx-store";
 
@@ -43,7 +43,8 @@ const ROLE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 };
 
 export function FornTabelaWorkspace() {
-  const [tableId, setTableId] = useState<string>(FT_TABLES[0]?.id ?? "hikvision");
+  const tables = getFtTables();
+  const [tableId, setTableId] = useState<string>(tables[0]?.id ?? "");
   const [linked, setLinked] = useState(false);
   const [running, setRunning] = useState(false);
   const [manual, setManual] = useState<Record<string, boolean>>({});
@@ -137,7 +138,7 @@ export function FornTabelaWorkspace() {
       <div className="nx-ft-layout">
         <aside className="nx-ft-rail">
           <div className="nx-ft-rail-h">Tabelas recebidas</div>
-          {FT_TABLES.map((t) => {
+          {tables.map((t) => {
             const rs = ftRows(t.id);
             const vinc = rs.filter((r) => r.nivel !== "none").length;
             const on = t.id === tableId;
@@ -152,7 +153,7 @@ export function FornTabelaWorkspace() {
               >
                 <div className="nx-ft-card-top">
                   <span className="nx-ft-card-forn">
-                    {FORNECEDORES[t.fornKey].nome}
+                    {getFornecedor(t.fornKey)?.nome ?? t.fornKey}
                   </span>
                   <span className="nx-ft-card-when">{t.atualizado}</span>
                 </div>
@@ -177,7 +178,7 @@ export function FornTabelaWorkspace() {
           <div className="nx-ft-actions card">
             <div className="nx-ft-act-l">
               <div className="nx-ft-act-title">
-                {FORNECEDORES[tbl.fornKey].nome}
+                {getFornecedor(tbl.fornKey)?.nome ?? tbl.fornKey}
               </div>
               <div className="nx-ft-schema">
                 {tbl.cols.map((c) => {

@@ -20,6 +20,10 @@ interface RelShellProps<T extends Record<string, unknown>> {
   hideBanner?: boolean;
   bannerActions?: ReactNode;
   onRowClick?: (row: T) => void;
+  layout?: "rel" | "listpage";
+  tableTitle?: string;
+  unitLabel?: string;
+  searchPlaceholder?: string;
 }
 
 export function RelShell<T extends Record<string, unknown>>({
@@ -36,6 +40,10 @@ export function RelShell<T extends Record<string, unknown>>({
   hideBanner,
   bannerActions,
   onRowClick,
+  layout,
+  tableTitle,
+  unitLabel,
+  searchPlaceholder,
 }: RelShellProps<T>) {
   const [active, setActive] = useState(defaultCard);
 
@@ -83,6 +91,10 @@ export function RelShell<T extends Record<string, unknown>>({
         activeLabel={isAll ? null : activeCard?.label ?? null}
         onClear={() => setActive(defaultCard)}
         onRowClick={onRowClick}
+        layout={layout}
+        title={tableTitle}
+        unitLabel={unitLabel}
+        searchPlaceholder={searchPlaceholder}
       />
     </div>
   );

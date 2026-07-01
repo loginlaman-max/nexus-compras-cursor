@@ -1,5 +1,5 @@
 /** Parser NF-e no browser — espelha a edge function parse-nfe. */
-import { FORNECEDORES, PRODUTOS, type FornKey } from "@/lib/catalog/products-data";
+import { FORNECEDORES, PRODUTOS, type FornKey } from "@/lib/catalog";
 import type { EmNota, EmNotaItem } from "@/lib/entrada/em-data";
 
 function els(root: Document | Element, localName: string): Element[] {

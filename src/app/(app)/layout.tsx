@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/shell/app-shell";
+import { CatalogProvider } from "@/components/providers/catalog-provider";
 import { OrgProvider } from "@/components/providers/org-provider";
 import { DEMO_MEMBERSHIPS, DEMO_ORG } from "@/lib/auth/demo";
 import { getUserMemberships, requireActiveOrg } from "@/lib/auth/session";
@@ -12,7 +13,9 @@ export default async function AppLayout({
   if (isDemoMode()) {
     return (
       <OrgProvider activeOrg={DEMO_ORG} memberships={DEMO_MEMBERSHIPS}>
-        <AppShell demo>{children}</AppShell>
+        <CatalogProvider>
+          <AppShell demo>{children}</AppShell>
+        </CatalogProvider>
       </OrgProvider>
     );
   }
@@ -22,7 +25,9 @@ export default async function AppLayout({
 
   return (
     <OrgProvider activeOrg={activeOrg} memberships={memberships}>
-      <AppShell>{children}</AppShell>
+      <CatalogProvider>
+        <AppShell>{children}</AppShell>
+      </CatalogProvider>
     </OrgProvider>
   );
 }

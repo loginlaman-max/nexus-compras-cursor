@@ -9,18 +9,27 @@ import {
 
 export const STORE_KEY_PRECO_TABELAS = "preco_tabelas";
 export const STORE_KEY_TP_BUILDER_MODE = "tp_builder_mode";
+const STORE_KEY_PRECO_TABELAS_INIT = "preco_tabelas_init";
 
+/** Carrega tabelas do localStorage — lista vazia é estado válido (não re-seeda). */
 export function tpLoadLocal(): TabelaPreco[] {
+  const initialized = nxStore.get<boolean>(STORE_KEY_PRECO_TABELAS_INIT, false);
   const v = nxStore.get<TabelaPreco[] | null>(STORE_KEY_PRECO_TABELAS, null);
-  if (!v || !Array.isArray(v) || v.length === 0) {
+
+  if (v !== null && Array.isArray(v)) return v;
+
+  if (!initialized && isDemoMode()) {
     const s = tpSeed();
     nxStore.set(STORE_KEY_PRECO_TABELAS, s);
+    nxStore.set(STORE_KEY_PRECO_TABELAS_INIT, true);
     return s;
   }
-  return v;
+
+  return [];
 }
 
 export function tpSaveLocal(arr: TabelaPreco[]): void {
+  nxStore.set(STORE_KEY_PRECO_TABELAS_INIT, true);
   nxStore.set(STORE_KEY_PRECO_TABELAS, arr);
 }
 
@@ -28,12 +37,10 @@ export async function loadTabelas(orgId?: string): Promise<TabelaPreco[]> {
   if (isSupabaseConfigured() && !isDemoMode() && orgId) {
     try {
       const remote = await fetchTabelasFromSupabase(orgId);
-      if (remote.length > 0) {
-        tpSaveLocal(remote);
-        return remote;
-      }
+      tpSaveLocal(remote);
+      return remote;
     } catch {
-      /* fallback local */
+      return tpLoadLocal();
     }
   }
   return tpLoadLocal();
@@ -43,14 +50,14 @@ export async function saveTabelas(
   arr: TabelaPreco[],
   orgId?: string,
 ): Promise<void> {
-  tpSaveLocal(arr);
   if (isSupabaseConfigured() && !isDemoMode() && orgId) {
     try {
       await saveTabelasToSupabase(orgId, arr);
     } catch {
-      /* local já persistido */
+      /* persiste local mesmo se remoto falhar */
     }
   }
+  tpSaveLocal(arr);
 }
 
 export function getBuilderMode(): "wizard" | "editor" {

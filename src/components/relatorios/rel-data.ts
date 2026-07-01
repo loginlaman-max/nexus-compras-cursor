@@ -17,6 +17,7 @@ import {
   tendencia,
   valorEstoque,
 } from "@/lib/catalog";
+import { rupturaRows as rupturaRowsFromCatalog } from "@/lib/catalog/ruptura-data";
 
 export function movRows() {
   return PRODUTOS.map((p) => {
@@ -143,33 +144,8 @@ export function cxfRows() {
     .sort((a, b) => b.valor - a.valor);
 }
 
-export function rupturaRows() {
-  return PRODUTOS.filter((p) => {
-    const s = status(p);
-    return s === "ruptura" || s === "critico";
-  })
-    .map((p) => {
-      const st = status(p);
-      const cob = cobertura(p);
-      const diasRup =
-        p.est === 0
-          ? Math.max(1, Math.round((p.leadTime || 7) * 0.7))
-          : Math.max(1, p.leadTime - cob);
-      return {
-        sku: p.codInt,
-        codForn: p.codForn || "—",
-        nome: p.nome,
-        forn: p.forn,
-        curva: p.curvaF,
-        dias: diasRup,
-        vendaDia: p.vDia,
-        zerado: p.est === 0,
-        critico: st === "critico",
-        perda: +(diasRup * p.vDia * (p.preco - p.custo)).toFixed(0),
-        sugerido: sugerido(p),
-      };
-    })
-    .sort((a, b) => b.perda - a.perda);
+export function rupturaRows(filial = "matriz") {
+  return rupturaRowsFromCatalog(filial);
 }
 
 export function excessoRows(filialId: string) {

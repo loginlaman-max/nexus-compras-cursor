@@ -2,11 +2,11 @@ import type { PedidoExtra } from "./cart-types";
 import { getPedidosExtra } from "./pedidos-extra";
 import {
   alcadaDe,
-  PEDIDOS_COMPRA,
+  getPedidosCompraDemo,
   type PedidoCompra,
   type PedidoStatus,
 } from "./pedidos-data";
-import { FORNECEDORES, PRODUTOS } from "./products-data";
+import { getFornecedor, getLiveProducts, type FornecedorInfo } from "./runtime";
 
 export interface PedidoItemLine {
   cod: string;
@@ -67,10 +67,11 @@ function normalizeExtra(p: PedidoExtra): PedidoCompra {
   };
 }
 
-/** Lista completa: extras do carrinho + pedidos mock (protótipo allPedidos). */
-export function getAllPedidos(): PedidoCompra[] {
+/** Lista completa: extras do carrinho + Supabase + demo (somente modo demo). */
+export function getAllPedidos(remote: PedidoCompra[] = []): PedidoCompra[] {
   const extras = getPedidosExtra().map(normalizeExtra);
-  return [...extras, ...PEDIDOS_COMPRA].sort(
+  const demo = getPedidosCompraDemo();
+  return [...extras, ...remote, ...demo].sort(
     (a, b) => b.emissao.getTime() - a.emissao.getTime(),
   );
 }
@@ -95,13 +96,13 @@ export function statusEfetivo(
 export function itensDoPedido(pedido: PedidoCompra): PedidoItemLine[] {
   if (pedido._itens?.length) return pedido._itens;
 
-  const prods = PRODUTOS.filter((p) => p.fornKey === pedido.fornKey);
+  const prods = getLiveProducts().filter((p) => p.fornKey === pedido.fornKey);
   const rng = pedRng(parseInt(pedido.num.replace(/\D/g, ""), 10) || 1);
   const raw: { p: (typeof prods)[0] | undefined; peso: number }[] = [];
   let acc = 0;
 
   for (let i = 0; i < pedido.itens; i++) {
-    const p = prods[Math.floor(rng() * prods.length)] || prods[0] || PRODUTOS[i];
+    const p = prods[Math.floor(rng() * prods.length)] || prods[0] || getLiveProducts()[i];
     const peso = 1 + rng() * 4;
     raw.push({ p, peso });
     acc += peso;
@@ -124,6 +125,6 @@ export function itensDoPedido(pedido: PedidoCompra): PedidoItemLine[] {
   });
 }
 
-export function fornMeta(fornKey: string) {
-  return FORNECEDORES[fornKey as keyof typeof FORNECEDORES] ?? {};
+export function fornMeta(fornKey: string): Partial<FornecedorInfo> {
+  return getFornecedor(fornKey) ?? {};
 }

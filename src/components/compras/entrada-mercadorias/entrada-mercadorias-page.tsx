@@ -47,6 +47,8 @@ import { pushHistoricoExport } from "@/lib/entrada/hn-data";
 import { uploadNfeXml } from "@/lib/entrada/nfe-api";
 import { nxStore } from "@/lib/store/nx-store";
 import { useOrg } from "@/components/providers/org-provider";
+import { usePedidosCompra } from "@/hooks/use-pedidos-compra";
+import { isDemoMode } from "@/lib/supabase/env";
 import { toast } from "sonner";
 
 const STEP_ICONS: Record<string, LucideIcon> = {
@@ -71,6 +73,7 @@ const DEFAULT_WIZARD: EmWizardState = {
 
 export function EntradaMercadoriasPageView() {
   const { activeOrg } = useOrg();
+  const { pedidos } = usePedidosCompra();
   const [saved, setSaved] = useState<EmWizardState>(() =>
     nxStore.get("em_wizard", DEFAULT_WIZARD),
   );
@@ -85,7 +88,9 @@ export function EntradaMercadoriasPageView() {
   const [vincs, setVincs] = useState<Record<string, EmVinculo>>(saved.vincs);
   const [pickOpen, setPickOpen] = useState(false);
   const [extraNotas, setExtraNotas] = useState<EmNota[]>(() =>
-    filterLegacyMockNotas(nxStore.get("em_extra_notas", [])),
+    isDemoMode()
+      ? filterLegacyMockNotas(nxStore.get("em_extra_notas", []))
+      : [],
   );
   const [remoteNotas, setRemoteNotas] = useState<EmNota[]>([]);
   const [xmlLoading, setXmlLoading] = useState(false);
@@ -98,6 +103,7 @@ export function EntradaMercadoriasPageView() {
 
   useEffect(() => {
     void reloadNotas();
+    if (!isDemoMode()) nxStore.remove("em_extra_notas");
   }, [reloadNotas]);
 
   const allNotas = useMemo(() => {
@@ -282,12 +288,17 @@ export function EntradaMercadoriasPageView() {
           return;
         }
 
-        setExtraNotas((prev) => {
-          const next = [nota, ...prev.filter((n) => n.id !== nota.id)];
-          nxStore.set("em_extra_notas", next);
-          return next;
-        });
-        setNotaId(nota.id);
+        if (result.persisted && result.nfe_id) {
+          await reloadNotas();
+          setNotaId(`nfe-${result.nfe_id}`);
+        } else {
+          setExtraNotas((prev) => {
+            const next = [nota, ...prev.filter((n) => n.id !== nota.id)];
+            if (isDemoMode()) nxStore.set("em_extra_notas", next);
+            return next;
+          });
+          setNotaId(nota.id);
+        }
         setStep(0);
 
         if (result.error) {
@@ -296,7 +307,6 @@ export function EntradaMercadoriasPageView() {
           );
         } else if (result.persisted) {
           toast.success(`NF-e ${nota.nf} importada e salva no Supabase`);
-          await reloadNotas();
         } else {
           toast.success(`NF-e ${nota.nf} carregada · ${nota.items.length} itens`);
         }
@@ -537,6 +547,7 @@ export function EntradaMercadoriasPageView() {
       {pickOpen && nota && (
         <EmVincPedido
           nota={nota}
+          pedidos={pedidos}
           onPick={vincularPedido}
           onClose={() => setPickOpen(false)}
         />

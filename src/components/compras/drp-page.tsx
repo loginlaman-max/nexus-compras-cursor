@@ -31,6 +31,7 @@ import {
 import { drpSugestoes, PRODUTOS, type DrpSugestaoRow } from "@/lib/catalog";
 import { fmtBRL, fmtInt } from "@/lib/format";
 import { usePager } from "@/hooks/use-pager";
+import { useCatalog } from "@/components/providers/catalog-provider";
 import { FILIAIS } from "@/lib/mock";
 
 function AcaoBadge({ acao }: { acao: DrpSugestaoRow["acao"] }) {
@@ -168,6 +169,7 @@ function drpCfg(r: DrpSugestaoRow): SkuQuickDrawerCfg {
 
 export function DrpPageView() {
   const { openProductDetail } = useCart();
+  const { loaded } = useCatalog();
   const [filial, setFilial] = useState("pa");
   const [card, setCard] = useState("todos");
   const [sel, setSel] = useState<Record<string, boolean>>({});

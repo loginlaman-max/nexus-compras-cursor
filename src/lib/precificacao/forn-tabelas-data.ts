@@ -1,10 +1,13 @@
 import {
   custoEf,
-  FORNECEDORES,
+  fornecedorKeys,
+  getFornecedor,
   PRODUTOS,
   type FornKey,
   type Product,
 } from "@/lib/catalog";
+
+import { isDemoMode } from "@/lib/supabase/env";
 
 export type FtColRole = "sku" | "ean" | "nome" | "custo" | "pv" | "ipi" | "cond";
 
@@ -127,11 +130,23 @@ export function ftTableDef(fornKey: FornKey): FtTableDef {
   };
 }
 
-export const FT_TABLES: FtTableDef[] = (
-  Object.keys(FORNECEDORES) as FornKey[]
-).map(ftTableDef);
+export function getFtTables(): FtTableDef[] {
+  return fornecedorKeys().map((k) => ftTableDef(k as FornKey));
+}
+
+/** @deprecated use getFtTables() */
+export const FT_TABLES: FtTableDef[] = new Proxy([] as FtTableDef[], {
+  get(_target, prop) {
+    const arr = getFtTables();
+    const val = Reflect.get(arr, prop, arr);
+    return typeof val === "function" ? val.bind(arr) : val;
+  },
+});
+
+const ftDataCache = new Map<string, FtTableRow[]>();
 
 export function gerarTabela(t: FtTableDef): FtTableRow[] {
+  if (!isDemoMode()) return [];
   const prods = PRODUTOS.filter((p) => p.fornKey === t.fornKey);
   const rng = ftRng(ftHash("ft|" + t.id));
   const rows: FtTableRow[] = prods.map((p) => {
@@ -152,7 +167,8 @@ export function gerarTabela(t: FtTableDef): FtTableRow[] {
     };
   });
 
-  const fornNome = FORNECEDORES[t.fornKey].nome.split(" ")[0].toUpperCase();
+  const forn = getFornecedor(t.fornKey);
+  const fornNome = (forn?.nome ?? t.fornKey).split(" ")[0].toUpperCase();
   for (let n = 0; n < 2; n++) {
     rows.push({
       id: t.id + "-nv" + n,
@@ -169,10 +185,19 @@ export function gerarTabela(t: FtTableDef): FtTableRow[] {
   return rows;
 }
 
-const FT_DATA: Record<string, FtTableRow[]> = {};
-FT_TABLES.forEach((t) => {
-  FT_DATA[t.id] = gerarTabela(t);
-});
+const FT_DATA: Record<string, FtTableRow[]> = new Proxy(
+  {},
+  {
+    get(_target, prop) {
+      const id = String(prop);
+      if (!ftDataCache.has(id)) {
+        const def = getFtTables().find((t) => t.id === id);
+        if (def) ftDataCache.set(id, gerarTabela(def));
+      }
+      return ftDataCache.get(id) ?? [];
+    },
+  },
+);
 
 export function ftRows(tableId: string): FtTableRow[] {
   return FT_DATA[tableId] ?? [];

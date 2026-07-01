@@ -1,6 +1,7 @@
 /** Carrega fila e histórico de NF-e/CT-e do Supabase (sem mock). */
 import { createClient } from "@/lib/supabase/client";
-import { FORNECEDORES, PRODUTOS, type FornKey } from "@/lib/catalog/products-data";
+import { PRODUTOS, type FornKey } from "@/lib/catalog";
+import { fornecedorEntries, getFornecedor } from "@/lib/catalog/runtime";
 import type { EmNota, EmNotaItem } from "@/lib/entrada/em-data";
 import type { HnCteRow, HnNfeRow } from "@/lib/entrada/hn-data";
 import { isDemoMode, isSupabaseConfigured } from "@/lib/supabase/env";
@@ -13,12 +14,13 @@ function supabaseUntyped() {
 
 function matchFornKey(cnpj: string, nome: string): FornKey {
   const clean = (cnpj ?? "").replace(/\D/g, "");
-  for (const [key, f] of Object.entries(FORNECEDORES)) {
+  for (const [key, f] of fornecedorEntries()) {
     if (f.cnpj.replace(/\D/g, "") === clean) return key as FornKey;
     if (nome && f.nome.toLowerCase().includes(nome.toLowerCase().slice(0, 8)))
       return key as FornKey;
   }
-  return (Object.keys(FORNECEDORES)[0] ?? "intelbras") as FornKey;
+  const first = fornecedorEntries()[0]?.[0];
+  return (first ?? "desconhecido") as FornKey;
 }
 
 function formatDateBr(iso: string | null | undefined): string {
@@ -63,7 +65,7 @@ function mapNfeToEmNota(
     nf: String(nfe.numero ?? ""),
     pedido: pedidoNum,
     fornKey,
-    forn: String(nfe.fornecedor_nome ?? FORNECEDORES[fornKey].nome),
+    forn: String(nfe.fornecedor_nome ?? getFornecedor(fornKey)?.nome ?? "—"),
     cnpj: String(nfe.fornecedor_cnpj ?? ""),
     uf: "SP",
     data: formatDateBr(

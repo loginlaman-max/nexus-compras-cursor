@@ -1,7 +1,57 @@
-import { COMPRADORES, FORNECEDORES, PRODUTOS, type Product } from "./products-data";
+import { COMPRADORES, type Product } from "./products-data";
+import {
+  fornecedorEntries,
+  fornecedorKeys,
+  getFornecedor,
+  getLiveFornecedores,
+  getLiveProducts,
+  isCatalogLoaded,
+} from "./runtime";
+import { isDemoMode } from "@/lib/supabase/env";
 
 export type { FornKey, Product } from "./products-data";
-export { COMPRADORES, FORNECEDORES, PRODUTOS };
+export { COMPRADORES };
+
+export function getFORNECEDORES() {
+  return getLiveFornecedores();
+}
+
+export function getPRODUTOS(): Product[] {
+  return getLiveProducts();
+}
+
+export { fornecedorEntries, fornecedorKeys, getFornecedor };
+
+function proxyArray<T extends object>(getter: () => T[]): T[] {
+  return new Proxy([] as T[], {
+    get(_target, prop) {
+      const arr = getter();
+      const val = Reflect.get(arr, prop, arr);
+      return typeof val === "function" ? val.bind(arr) : val;
+    },
+  });
+}
+
+/** Em produção delega ao catálogo Supabase/Bling; em demo usa mock estático. */
+export const PRODUTOS = proxyArray(getLiveProducts);
+export const FORNECEDORES = new Proxy({} as ReturnType<typeof getLiveFornecedores>, {
+  get(_target, prop) {
+    return Reflect.get(getLiveFornecedores(), prop);
+  },
+  has(_target, prop) {
+    return Reflect.has(getLiveFornecedores(), prop);
+  },
+  ownKeys() {
+    return Reflect.ownKeys(getLiveFornecedores());
+  },
+  getOwnPropertyDescriptor(_target, prop) {
+    const desc = Reflect.getOwnPropertyDescriptor(getLiveFornecedores(), prop);
+    if (desc) {
+      return { ...desc, configurable: true, enumerable: true };
+    }
+    return desc;
+  },
+});
 
 export type StockStatus =
   | "ruptura"
@@ -63,6 +113,10 @@ export function scopeProduto(p: Product, filialId: string): Product {
 }
 
 export function produtosDe(filialId: string): Product[] {
+  const PRODUTOS = getLiveProducts();
+  if (!isDemoMode() && isCatalogLoaded()) {
+    return PRODUTOS;
+  }
   if (filialId === "matriz" || filialId === "todas" || !filialId) {
     return PRODUTOS;
   }
@@ -162,6 +216,7 @@ export {
 export {
   MESES12,
   PEDIDOS_OTIF,
+  getPedidosOtif,
   filtrarPedidosPorPeriodo,
   filtrarPedidosOtifPorPeriodo,
   otifGeral,
@@ -174,6 +229,7 @@ export {
   savingPorFornecedor,
   savingTrend,
   savingTrendForPeriod,
+  type OtifFornRow,
   type OtifGeral,
   type OtifTrendPoint,
   type PedidoOtif,

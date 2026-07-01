@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Download, PiggyBank, Search, Truck } from "lucide-react";
+import { Download, Maximize2, Minimize2, PiggyBank, Search, Truck } from "lucide-react";
 import { SavTrendChart } from "@/components/relatorios/sav-trend-chart";
+import { TablePager } from "@/components/rel/table-pager";
+import { usePager } from "@/hooks/use-pager";
 import {
   filtrarPedidosPorPeriodo,
   savingMetaAnual,
@@ -43,6 +45,7 @@ const SAV_META_ANUAL = savingMetaAnual();
 export function SavingPageView() {
   const [q, setQ] = useState("");
   const [periodo, setPeriodo] = useState<Periodo>("12 meses");
+  const [fs, setFs] = useState(false);
 
   const pedidosFiltrados = useMemo(
     () => filtrarPedidosPorPeriodo(periodo),
@@ -63,6 +66,7 @@ export function SavingPageView() {
       r.nome.toLowerCase().includes(q.toLowerCase()) ||
       r.comprador.toLowerCase().includes(q.toLowerCase()),
   );
+  const pager = usePager(rows, 12);
 
   const totalSaving = savRows.reduce((a, b) => a + b.saving, 0);
   const totalBaseline = savRows.reduce((a, b) => a + b.baseline, 0);
@@ -229,18 +233,32 @@ export function SavingPageView() {
         </div>
       </div>
 
-      <div className="card nx-listpage-fill" style={{ marginTop: 14 }}>
+      <div
+        className={`card nx-fs nx-listpage-fill${fs ? " is-fs" : ""}`}
+        style={{ marginTop: 14 }}
+      >
         <div className="nx-cc-toolbar">
           <div className="nx-cc-tooltitle">
             <Truck className="size-[15px]" /> Saving por fornecedor
           </div>
           <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            className="nx-rowbtn"
+            title={fs ? "Recolher" : "Expandir"}
+            onClick={() => setFs((v) => !v)}
+          >
+            {fs ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
           <label className="field" style={{ width: 240 }}>
             <Search className="size-[13px] shrink-0 text-muted-foreground" />
             <input
               placeholder="Pesquisar fornecedor ou comprador"
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => {
+                setQ(e.target.value);
+                pager.reset();
+              }}
             />
           </label>
         </div>
@@ -266,7 +284,7 @@ export function SavingPageView() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {pager.pageItems.map((r) => (
                 <tr key={r.nome}>
                   <td style={{ fontWeight: 500 }}>{r.nome}</td>
                   <td style={{ color: "hsl(var(--muted-foreground))" }}>
@@ -344,6 +362,17 @@ export function SavingPageView() {
             </tfoot>
           </table>
         </div>
+        <TablePager
+          from={pager.from}
+          to={pager.to}
+          total={pager.total}
+          page={pager.page}
+          totalPages={pager.totalPages}
+          per={pager.per}
+          unitLabel="fornecedores"
+          onPage={pager.setPage}
+          onPer={pager.setPer}
+        />
       </div>
     </div>
   );

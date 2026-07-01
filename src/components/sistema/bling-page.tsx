@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft,
   Key,
@@ -10,13 +10,16 @@ import {
   Webhook,
 } from "lucide-react";
 import { RelBanner } from "@/components/rel/rel-banner";
+import { useCatalog } from "@/components/providers/catalog-provider";
+import { useOrg } from "@/components/providers/org-provider";
+import { isDemoMode } from "@/lib/supabase/env";
+import { toast } from "sonner";
 
-const SYNC_ENTIDADES = [
-  { id: "produtos", label: "Produtos", registros: 5594, status: "sucesso", on: true },
-  { id: "contatos", label: "Fornecedores & Clientes", registros: 1842, status: "sucesso", on: true },
-  { id: "estoque", label: "Estoque", registros: 10428, status: "sucesso", on: true },
-  { id: "pedidos", label: "Pedidos", registros: 327, status: "parcial", on: true },
-  { id: "vendas", label: "Vendas históricas", registros: 0, status: "erro", on: false },
+const ENTIDADES = [
+  { id: "produtos", label: "Produtos" },
+  { id: "contatos", label: "Fornecedores & Clientes" },
+  { id: "estoque", label: "Estoque" },
+  { id: "vendas", label: "Vendas históricas" },
 ];
 
 const TABS = [
@@ -25,6 +28,30 @@ const TABS = [
   { id: "credenciais", label: "Credenciais", icon: Key },
   { id: "webhooks", label: "Webhooks", icon: Webhook },
 ] as const;
+
+type BlingStatus = {
+  bling_configured: boolean;
+  conexoes: {
+    filial_id: string;
+    status: string;
+    conta_nome: string | null;
+    last_sync_at: string | null;
+    expires_at: string | null;
+  }[];
+  totais: { produtos: number; fornecedores: number; estoque_linhas: number };
+  conectadas: number;
+};
+
+function formatRelative(iso: string | null): string {
+  if (!iso) return "nunca";
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  return `há ${Math.floor(h / 24)} dias`;
+}
 
 export function BlingPageView({
   embedded,
@@ -35,8 +62,59 @@ export function BlingPageView({
   onBack?: () => void;
   onSaved?: (msg: string) => void;
 } = {}) {
+  const { activeOrg } = useOrg();
+  const { refresh: refreshCatalog } = useCatalog();
+  const demo = isDemoMode();
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("visao");
-  const [ents, setEnts] = useState(SYNC_ENTIDADES);
+  const [status, setStatus] = useState<BlingStatus | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [entsOn, setEntsOn] = useState<Record<string, boolean>>({
+    produtos: true,
+    contatos: true,
+    estoque: true,
+    vendas: true,
+  });
+
+  const loadStatus = useCallback(async () => {
+    if (demo) return;
+    const res = await fetch(
+      `/api/bling/status?org_id=${encodeURIComponent(activeOrg.orgId)}`,
+    );
+    if (res.ok) setStatus((await res.json()) as BlingStatus);
+  }, [activeOrg.orgId, demo]);
+
+  useEffect(() => {
+    void loadStatus();
+  }, [loadStatus]);
+
+  const runSync = async () => {
+    if (demo) {
+      onSaved?.("Modo demo — configure Supabase e Bling");
+      return;
+    }
+    setSyncing(true);
+    try {
+      const entidades = ENTIDADES.filter((e) => entsOn[e.id]).map((e) => e.id);
+      const res = await fetch("/api/bling/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ org_id: activeOrg.orgId, entidades }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Falha na sync");
+      await loadStatus();
+      await refreshCatalog();
+      toast.success("Sincronização concluída");
+      onSaved?.("Sincronização concluída");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro na sincronização");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const conectado = (status?.conectadas ?? 0) > 0;
+  const primeira = status?.conexoes?.[0];
 
   return (
     <div className={embedded ? "nx-set-content" : "nx-bling"}>
@@ -53,35 +131,60 @@ export function BlingPageView({
       <RelBanner
         icon={Plug}
         title="Bling ERP v3"
-        subtitle="Integração OAuth 2.0 · sincronização automática a cada 30 minutos"
+        subtitle={
+          demo
+            ? "Modo demonstração — dados fictícios"
+            : status?.bling_configured
+              ? "Integração OAuth 2.0 · sincronização sob demanda"
+              : "Configure BLING_CLIENT_ID e BLING_CLIENT_SECRET no servidor"
+        }
         actions={
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => onSaved?.("Sincronização iniciada")}
+            disabled={syncing || demo}
+            onClick={() => void runSync()}
           >
-            <RefreshCw className="size-3.5" /> Sincronizar agora
+            <RefreshCw className={`size-3.5${syncing ? " animate-spin" : ""}`} />{" "}
+            {syncing ? "Sincronizando…" : "Sincronizar agora"}
           </button>
         }
       />
       <div className="card nx-bling-conn">
         <div className="nx-bling-conn-left">
-          <div className="nx-bling-statusdot on" />
+          <div className={`nx-bling-statusdot${conectado ? " on" : ""}`} />
           <div>
-            <div className="nx-bling-conn-title">Conectado ao Bling</div>
-            <div className="nx-bling-conn-sub">Conta: Nexus Compras Distribuição</div>
+            <div className="nx-bling-conn-title">
+              {conectado ? "Conectado ao Bling" : "Nenhuma conta conectada"}
+            </div>
+            <div className="nx-bling-conn-sub">
+              {primeira?.conta_nome
+                ? `Conta: ${primeira.conta_nome}`
+                : "Conecte uma filial em Integrações"}
+            </div>
           </div>
         </div>
         <div className="nx-bling-conn-meta">
-          <div><span className="l">Última sync</span><span className="v ok">há 5 min</span></div>
-          <div><span className="l">Token</span><span className="v">renova em 47 min</span></div>
+          <div>
+            <span className="l">Última sync</span>
+            <span className="v ok">{formatRelative(primeira?.last_sync_at ?? null)}</span>
+          </div>
+          <div>
+            <span className="l">Contas</span>
+            <span className="v">{status?.conectadas ?? 0} ativas</span>
+          </div>
         </div>
       </div>
       <div className="nx-bling-tabs">
         {TABS.map((t) => {
           const Icon = t.icon;
           return (
-            <button key={t.id} type="button" className={`nx-bling-tab${tab === t.id ? " is-active" : ""}`} onClick={() => setTab(t.id)}>
+            <button
+              key={t.id}
+              type="button"
+              className={`nx-bling-tab${tab === t.id ? " is-active" : ""}`}
+              onClick={() => setTab(t.id)}
+            >
               <Icon className="size-3.5" /> {t.label}
             </button>
           );
@@ -90,10 +193,13 @@ export function BlingPageView({
       {tab === "visao" && (
         <div className="nx-bling-kpis">
           {[
-            { l: "Produtos sincronizados", v: "5.594" },
-            { l: "Pedidos no mês", v: "327" },
-            { l: "NF-e importadas", v: "214" },
-            { l: "Taxa de sucesso", v: "98,2%" },
+            { l: "Produtos sincronizados", v: String(status?.totais.produtos ?? 0) },
+            { l: "Fornecedores", v: String(status?.totais.fornecedores ?? 0) },
+            { l: "Linhas de estoque", v: String(status?.totais.estoque_linhas ?? 0) },
+            {
+              l: "Status API",
+              v: status?.bling_configured ? "Configurada" : "Pendente",
+            },
           ].map((k) => (
             <div key={k.l} className="card p-4">
               <div className="type-caption">{k.l}</div>
@@ -108,22 +214,20 @@ export function BlingPageView({
             <thead>
               <tr>
                 <th>Entidade</th>
-                <th className="num">Registros</th>
-                <th>Status</th>
                 <th>Ativo</th>
               </tr>
             </thead>
             <tbody>
-              {ents.map((e) => (
+              {ENTIDADES.map((e) => (
                 <tr key={e.id}>
                   <td>{e.label}</td>
-                  <td className="num mono">{e.registros.toLocaleString("pt-BR")}</td>
-                  <td><span className={`pill pill-${e.status === "sucesso" ? "ok" : e.status === "parcial" ? "baixo" : "ruptura"}`}>{e.status}</span></td>
                   <td>
                     <input
                       type="checkbox"
-                      checked={e.on}
-                      onChange={() => setEnts((prev) => prev.map((x) => x.id === e.id ? { ...x, on: !x.on } : x))}
+                      checked={entsOn[e.id] ?? true}
+                      onChange={() =>
+                        setEntsOn((prev) => ({ ...prev, [e.id]: !prev[e.id] }))
+                      }
                     />
                   </td>
                 </tr>
@@ -134,21 +238,23 @@ export function BlingPageView({
       )}
       {tab === "credenciais" && (
         <div className="card nx-bling-cred p-4">
-          <div className="nx-set-grid">
-            <label className="nx-set-field full">Client ID<input defaultValue="a1b2c3d4e5f6g7h8i9j0" readOnly /></label>
-            <label className="nx-set-field full">Redirect URI<input defaultValue="https://app.nexuscompras.com.br/callback" readOnly /></label>
-          </div>
+          <p className="type-caption m-0">
+            Credenciais OAuth ficam em variáveis de ambiente do servidor (Vercel).
+            Redirect URI:{" "}
+            <code className="mono">
+              {typeof window !== "undefined"
+                ? `${window.location.origin}/api/bling/callback`
+                : "/api/bling/callback"}
+            </code>
+          </p>
         </div>
       )}
       {tab === "webhooks" && (
         <div className="card p-4">
-          {["estoque", "produtos", "vendas", "nfe"].map((w) => (
-            <label key={w} className="nx-bling-check">
-              <input type="checkbox" defaultChecked={w !== "nfe"} />
-              <span className="box">✓</span>
-              Webhook {w}
-            </label>
-          ))}
+          <p className="type-caption m-0">
+            Webhooks do Bling serão configurados em versão futura. Use
+            sincronização manual ou agendada por enquanto.
+          </p>
         </div>
       )}
     </div>

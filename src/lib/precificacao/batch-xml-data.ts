@@ -1,4 +1,5 @@
 import { FORNECEDORES, PRODUTOS, type Product } from "@/lib/catalog";
+import { getCatalogVersion } from "@/lib/catalog/runtime";
 
 export interface BxNfItem {
   codInt: string;
@@ -60,6 +61,9 @@ function buildBatch() {
     (byForn[p.fornKey] ||= []).push(p);
   });
   const fornKeys = Object.keys(byForn);
+  if (!fornKeys.length) {
+    return { nfes: [] as BxNfe[], ctes: [] as BxCte[] };
+  }
   const nfes: BxNfe[] = [];
   let seq = 90120;
   const plano = [
@@ -68,10 +72,11 @@ function buildBatch() {
     { fk: fornKeys[2], frete: "FOB" as const },
     { fk: fornKeys[3] || fornKeys[0], frete: "FOB" as const },
     { fk: fornKeys[4] || fornKeys[1], frete: "CIF" as const },
-  ];
+  ].filter((pl) => pl.fk && byForn[pl.fk]?.length);
   plano.forEach((pl, i) => {
     const prods = byForn[pl.fk];
     const forn = FORNECEDORES[pl.fk as keyof typeof FORNECEDORES];
+    if (!prods?.length || !forn) return;
     const rng = bxRng(9000 + i * 211);
     const nItems = Math.min(prods.length, 3 + Math.floor(rng() * 3));
     const items: BxNfItem[] = [];
@@ -118,27 +123,47 @@ function buildBatch() {
       items,
     });
   });
-  const ctes: BxCte[] = [
-    {
-      id: "cteA",
-      cte: "770114",
-      transp: "RODONAVES TRANSPORTES",
-      cnpj: "44.914.992/0001-00",
-      uf: "SP→PA",
-      vlrFrete: +((nfes[0].vlrProd + nfes[1].vlrProd) * 0.041).toFixed(2),
-      ref: ["nf0", "nf1"],
-    },
-    {
-      id: "cteB",
-      cte: "880233",
-      transp: "BRASPRESS TRANSPORTES",
-      cnpj: "48.740.351/0004-13",
-      uf: "SC→PA",
-      vlrFrete: +(nfes[2].vlrProd * 0.052).toFixed(2),
-      ref: ["nf2"],
-    },
-  ];
+  const ctes: BxCte[] =
+    nfes.length >= 3
+      ? [
+          {
+            id: "cteA",
+            cte: "770114",
+            transp: "RODONAVES TRANSPORTES",
+            cnpj: "44.914.992/0001-00",
+            uf: "SP→PA",
+            vlrFrete: +((nfes[0].vlrProd + nfes[1].vlrProd) * 0.041).toFixed(2),
+            ref: ["nf0", "nf1"],
+          },
+          {
+            id: "cteB",
+            cte: "880233",
+            transp: "BRASPRESS TRANSPORTES",
+            cnpj: "48.740.351/0004-13",
+            uf: "SC→PA",
+            vlrFrete: +(nfes[2].vlrProd * 0.052).toFixed(2),
+            ref: ["nf2"],
+          },
+        ]
+      : [];
   return { nfes, ctes };
 }
 
-export const BX_BATCH = buildBatch();
+let bxBatchCache: ReturnType<typeof buildBatch> | null = null;
+let bxBatchVersion = -1;
+
+export function getBxBatch() {
+  const v = getCatalogVersion();
+  if (!bxBatchCache || bxBatchVersion !== v) {
+    bxBatchCache = buildBatch();
+    bxBatchVersion = v;
+  }
+  return bxBatchCache;
+}
+
+/** @deprecated use getBxBatch() — mantido para compatibilidade */
+export const BX_BATCH = new Proxy({} as ReturnType<typeof buildBatch>, {
+  get(_target, prop) {
+    return Reflect.get(getBxBatch(), prop);
+  },
+});

@@ -1,114 +1,611 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Gauge } from "lucide-react";
-import { RelBanner } from "@/components/rel/rel-banner";
-import { RelTable } from "@/components/rel/rel-table";
-import { PRODUTOS, sugerido } from "@/lib/catalog";
+import { useEffect, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  BarChart3,
+  CheckCircle,
+  Gauge,
+  ListChecks,
+  Maximize2,
+  Minimize2,
+  Scale,
+  Search,
+  Target,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
+import { BpBudgetGauge } from "@/components/relatorios/bp-budget-gauge";
+import { BpDesvioDrawer } from "@/components/relatorios/bp-desvio-drawer";
+import { BpMonthlyChart } from "@/components/relatorios/bp-monthly-chart";
+import { TablePager } from "@/components/rel/table-pager";
+import { useCatalog } from "@/components/providers/catalog-provider";
+import {
+  openProductFromSku,
+  useCart,
+  type ProductDetailTarget,
+} from "@/components/providers/cart-provider";
+import { usePager } from "@/hooks/use-pager";
+import { PRODUTOS } from "@/lib/catalog";
 import { fmtBRL, fmtCompactBRL } from "@/lib/format";
+import {
+  BP_BUYERS,
+  BP_MESES,
+  bpPct,
+  buildBpLines,
+  motivoDesvio,
+  type BpBuyer,
+  type BpLine,
+} from "@/lib/relatorios/desempenho-comprador-data";
 
-const BUYERS = {
-  "Douglas Jardel": { limite: 80000, hist: [62000, 71000, 58000, 83000, 76000, 88200] },
-  "Jailson Barros": { limite: 60000, hist: [41000, 52000, 47000, 55000, 49000, 53400] },
-  "Rayane Aline": { limite: 45000, hist: [38000, 42000, 31000, 44000, 47600, 39800] },
-} as const;
+const BUYER_NAMES = Object.keys(BP_BUYERS) as BpBuyer[];
 
-type Buyer = keyof typeof BUYERS;
-
-function buildLines(comprador: Buyer) {
-  return PRODUTOS.filter((p) => p.comprador === comprador && sugerido(p) > 0).map((p, i) => {
-    const sug = sugerido(p);
-    const f = [1.0, 1.75, 0.6, 1.3, 0.85, 2.1, 1.0, 0.5, 1.45][i % 9];
-    const comprado = Math.max(0, Math.round(sug * f));
-    return {
-      sku: p.codInt,
-      nome: p.nome,
-      forn: p.forn,
-      sugerido: sug,
-      comprado,
-      valor: +(comprado * p.custo).toFixed(2),
-      desvioPct: sug > 0 ? ((comprado - sug) / sug) * 100 : 0,
-    };
-  });
+function detalheDe(l: BpLine, buyer: string): ProductDetailTarget {
+  const cp = PRODUTOS.find((p) => p.codInt === l.sku) ?? null;
+  const mot = motivoDesvio(l, cp);
+  return {
+    ...openProductFromSku(l.sku),
+    desvioCtx: {
+      buyer,
+      sugerido: l.sugerido,
+      comprado: l.comprado,
+      desvioTxt: `${l.desvioUn > 0 ? "+" : ""}${l.desvioUn} un (${l.desvioPct > 0 ? "+" : ""}${l.desvioPct.toFixed(0)}%)`,
+      title: mot.label,
+      reason: mot.detail,
+      icon: mot.icon,
+      tone: l.desvioUn > 0 ? "over" : l.desvioUn < 0 ? "under" : "ok",
+    },
+  };
 }
 
 export function BuyerPerformancePageView() {
-  const [buyer, setBuyer] = useState<Buyer>("Douglas Jardel");
-  const meta = BUYERS[buyer];
-  const lines = useMemo(() => buildLines(buyer), [buyer]);
-  const used = lines.reduce((a, b) => a + b.valor, 0);
-  const pct = meta.limite > 0 ? (used / meta.limite) * 100 : 0;
-  const over = pct > 100;
+  const { loaded } = useCatalog();
+  const { openProductDetail } = useCart();
+
+  const [buyer, setBuyer] = useState<BpBuyer>(BUYER_NAMES[0]);
+  const [q, setQ] = useState("");
+  const [fs, setFs] = useState(false);
+  const [tab, setTab] = useState<"mensal" | "prod">("mensal");
+  const [rowMode, setRowMode] = useState<"detalhe" | "drawer">("drawer");
+  const [drawerLine, setDrawerLine] = useState<BpLine | null>(null);
+
+  const cfg = BP_BUYERS[buyer];
+  const lines = useMemo(() => buildBpLines(buyer), [buyer, loaded]);
+
+  const realizado = lines.reduce((a, l) => a + l.valor, 0);
+  const sugeridoValor = lines.reduce((a, l) => a + l.sugerido * l.custo, 0);
+  const saldo = cfg.limite - realizado;
+  const usoPct = cfg.limite > 0 ? (realizado / cfg.limite) * 100 : 0;
+  const excedeu = realizado > cfg.limite;
+
+  const acima = lines.filter((l) => l.desvioUn > 0);
+  const abaixo = lines.filter((l) => l.desvioUn < 0);
+  const naLinha = lines.filter((l) => l.desvioUn === 0);
+  const valorExcesso = acima.reduce((a, l) => a + l.desvioUn * l.custo, 0);
+  const aderencia = lines.length
+    ? 100 -
+      lines.reduce((a, l) => a + Math.abs(l.desvioPct), 0) / lines.length
+    : 100;
+
+  const rows = lines
+    .filter(
+      (l) =>
+        !q ||
+        l.nome.toLowerCase().includes(q.toLowerCase()) ||
+        l.sku.includes(q),
+    )
+    .sort((a, b) => Math.abs(b.desvioPct) - Math.abs(a.desvioPct));
+
+  const pager = usePager(rows, 12);
+
+  useEffect(() => {
+    pager.reset();
+  }, [buyer, q]);
+
+  function onRowClick(l: BpLine) {
+    if (rowMode === "detalhe") {
+      openProductDetail(detalheDe(l, buyer));
+    } else {
+      setDrawerLine(l);
+    }
+  }
+
+  function drawerToDetalhe() {
+    if (!drawerLine) return;
+    const l = drawerLine;
+    setDrawerLine(null);
+    openProductDetail(detalheDe(l, buyer));
+  }
+
+  const tableBlock = (full: boolean) => (
+    <>
+      <div className="nx-cc-toolbar">
+        <div className="nx-cc-tooltitle">
+          <ListChecks size={15} /> Sugerido × Comprado · por produto
+        </div>
+        <div style={{ flex: 1 }} />
+        <div className="nx-bp-rowmode" title="Ação ao clicar no produto">
+          <span className="nx-bp-rowmode-lb">Ao clicar:</span>
+          <button
+            type="button"
+            className={rowMode === "detalhe" ? "is-active" : ""}
+            onClick={() => setRowMode("detalhe")}
+          >
+            Detalhamento
+          </button>
+          <button
+            type="button"
+            className={rowMode === "drawer" ? "is-active" : ""}
+            onClick={() => setRowMode("drawer")}
+          >
+            Análise do desvio
+          </button>
+        </div>
+        <button
+          type="button"
+          className="nx-rowbtn"
+          title={full ? "Recolher" : "Expandir"}
+          onClick={() => setFs(!full)}
+        >
+          {full ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
+        <label className="field" style={{ width: 240 }}>
+          <Search size={13} />
+          <input
+            placeholder="Pesquisar produto"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </label>
+      </div>
+      <div className="nx-tblscroll">
+        <table className="tbl tbl-otif">
+          <thead>
+            <tr>
+              <th style={{ width: 80 }}>SKU</th>
+              <th>Produto</th>
+              <th style={{ width: 160 }}>Fornecedor</th>
+              <th className="num" style={{ width: 90 }}>
+                Sugerido
+              </th>
+              <th className="num" style={{ width: 90 }}>
+                Comprado
+              </th>
+              <th className="num" style={{ width: 90 }}>
+                Desvio
+              </th>
+              <th style={{ width: 130 }}>Aderência</th>
+              <th className="num" style={{ width: 120 }}>
+                Valor
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {pager.pageItems.map((l) => {
+              const over = l.desvioUn > 0;
+              const under = l.desvioUn < 0;
+              const col = over
+                ? "hsl(var(--status-ruptura))"
+                : under
+                  ? "hsl(var(--status-baixo))"
+                  : "hsl(var(--status-ok))";
+              const mag = Math.min(100, Math.abs(l.desvioPct));
+              return (
+                <tr
+                  key={l.sku}
+                  className="nx-bp-rowclick"
+                  onClick={() => onRowClick(l)}
+                  title="Ver análise do desvio"
+                >
+                  <td
+                    className="mono"
+                    style={{ color: "hsl(var(--muted-foreground))" }}
+                  >
+                    {l.sku}
+                  </td>
+                  <td style={{ fontWeight: 500 }}>
+                    <span className="nx-bp-prodlink">{l.nome}</span>
+                  </td>
+                  <td style={{ color: "hsl(var(--muted-foreground))" }}>
+                    {l.forn}
+                  </td>
+                  <td className="num mono">{l.sugerido}</td>
+                  <td className="num mono" style={{ fontWeight: 600 }}>
+                    {l.comprado}
+                  </td>
+                  <td
+                    className="num mono"
+                    style={{ color: col, fontWeight: 600 }}
+                  >
+                    {l.desvioUn > 0 ? "+" : ""}
+                    {l.desvioUn} un
+                  </td>
+                  <td>
+                    <div className="nx-bp-adh">
+                      <div className="nx-bp-adh-track">
+                        <div
+                          className="nx-bp-adh-fill"
+                          style={{
+                            width: `${mag}%`,
+                            background: col,
+                          }}
+                        />
+                      </div>
+                      <span
+                        className="mono"
+                        style={{
+                          color: col,
+                          fontWeight: 600,
+                          fontSize: 11,
+                        }}
+                      >
+                        {l.desvioPct > 0 ? "+" : ""}
+                        {l.desvioPct.toFixed(0)}%
+                      </span>
+                    </div>
+                  </td>
+                  <td className="num mono">{fmtBRL(l.valor)}</td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 && (
+              <tr>
+                <td
+                  colSpan={8}
+                  style={{
+                    textAlign: "center",
+                    padding: 36,
+                    color: "hsl(var(--muted-foreground))",
+                  }}
+                >
+                  Sem compras no período.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <TablePager
+        from={pager.from}
+        to={pager.to}
+        total={pager.total}
+        page={pager.page}
+        totalPages={pager.totalPages}
+        per={pager.per}
+        unitLabel="SKUs"
+        onPage={pager.setPage}
+        onPer={pager.setPer}
+      />
+    </>
+  );
 
   return (
-    <div className="nx-bp nx-listpage">
-      <RelBanner
-        icon={Gauge}
-        title="Desempenho Comprador"
-        subtitle="Aderência à sugestão de compra e uso do orçamento mensal"
-        actions={
+    <div className="nx-rel nx-bp nx-listpage">
+      <div className="nx-rel-banner">
+        <div className="nx-rel-banner-icon">
+          <Gauge size={20} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h1 className="nx-rel-banner-title">Desempenho do Comprador</h1>
+          <p className="nx-rel-banner-sub">
+            Orçamento mensal × realizado e aderência às sugestões da ferramenta
+          </p>
+        </div>
+        <div className="nx-rel-banner-actions">
           <div className="nx-bp-buyerseg">
-            {(Object.keys(BUYERS) as Buyer[]).map((b) => (
-              <button key={b} type="button" className={buyer === b ? "is-active" : ""} onClick={() => setBuyer(b)}>
-                {b.split(" ")[0]}
+            {BUYER_NAMES.map((n) => (
+              <button
+                key={n}
+                type="button"
+                className={buyer === n ? "is-active" : ""}
+                onClick={() => setBuyer(n)}
+              >
+                {n.split(" ")[0]}
               </button>
             ))}
           </div>
-        }
-      />
+        </div>
+      </div>
+
       <div className="nx-bp-top">
         <div className="card nx-bp-budget">
           <div className="nx-bp-budget-head">
             <div>
-              <div className="nx-bp-budget-label">Orçamento utilizado</div>
-              <div className="nx-bp-budget-val">
-                {fmtCompactBRL(used)} <span>/ {fmtCompactBRL(meta.limite)}</span>
+              <div className="nx-bp-budget-label">
+                Orçamento de {BP_MESES[BP_MESES.length - 1]}/26 · {buyer}
               </div>
-              <div className={`nx-bp-budget-status${over ? " over" : " ok"}`}>
-                {over ? "Acima do limite" : "Dentro do limite"}
+              <div className="nx-bp-budget-val">
+                {fmtBRL(realizado)}{" "}
+                <span>/ {fmtBRL(cfg.limite)}</span>
+              </div>
+              <div
+                className={`nx-bp-budget-status ${excedeu ? "over" : "ok"}`}
+              >
+                {excedeu ? (
+                  <AlertTriangle size={13} />
+                ) : (
+                  <CheckCircle size={13} />
+                )}
+                {excedeu
+                  ? `Estourou em ${fmtBRL(realizado - cfg.limite)} (${bpPct(usoPct - 100)})`
+                  : `${fmtBRL(saldo)} disponíveis · ${bpPct(100 - usoPct)} do limite`}
+              </div>
+            </div>
+            <BpBudgetGauge used={realizado} limit={cfg.limite} />
+          </div>
+          <div className="nx-bp-bar">
+            <div
+              className="nx-bp-bar-fill"
+              style={{
+                width: `${Math.min(100, usoPct)}%`,
+                background: excedeu
+                  ? "hsl(var(--status-ruptura))"
+                  : usoPct > 85
+                    ? "hsl(var(--status-baixo))"
+                    : "hsl(var(--status-ok))",
+              }}
+            />
+            {excedeu && (
+              <div
+                className="nx-bp-bar-over"
+                style={{ width: `${Math.min(100, usoPct - 100)}%` }}
+              />
+            )}
+          </div>
+        </div>
+
+        <div className="nx-bp-kpis">
+          <div className="card kpi">
+            <div className="kpi-label">Aderência à sugestão</div>
+            <div
+              className="kpi-value"
+              style={{
+                color:
+                  aderencia >= 85
+                    ? "hsl(var(--status-ok))"
+                    : aderencia >= 70
+                      ? "hsl(var(--status-baixo))"
+                      : "hsl(var(--status-ruptura))",
+              }}
+            >
+              {aderencia.toFixed(0)}%
+            </div>
+            <div className="type-caption" style={{ marginTop: 4 }}>
+              {naLinha.length} em linha · {acima.length} acima · {abaixo.length}{" "}
+              abaixo
+            </div>
+          </div>
+          <div className="card kpi">
+            <div className="kpi-label">Comprado acima do sugerido</div>
+            <div
+              className="kpi-value"
+              style={{ color: "hsl(var(--status-ruptura))" }}
+            >
+              {fmtCompactBRL(valorExcesso)}
+            </div>
+            <div className="type-caption" style={{ marginTop: 4 }}>
+              {acima.length} SKUs acima da recomendação
+            </div>
+          </div>
+          <div className="card kpi">
+            <div className="kpi-label">Sugerido pela ferramenta</div>
+            <div className="kpi-value">{fmtCompactBRL(sugeridoValor)}</div>
+            <div className="type-caption" style={{ marginTop: 4 }}>
+              Realizado:{" "}
+              {bpPct(
+                sugeridoValor > 0 ? (realizado / sugeridoValor) * 100 : 0,
+              )}{" "}
+              do sugerido
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="nx-rel-tabs" style={{ paddingBottom: 0, marginTop: 14 }}>
+        <button
+          type="button"
+          className={`nx-rel-tab${tab === "mensal" ? " is-active" : ""}`}
+          onClick={() => setTab("mensal")}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+        >
+          <BarChart3 size={13} /> Evolução mensal
+        </button>
+        <button
+          type="button"
+          className={`nx-rel-tab${tab === "prod" ? " is-active" : ""}`}
+          onClick={() => setTab("prod")}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+        >
+          <ListChecks size={13} /> Por produto
+        </button>
+      </div>
+
+      {tab === "mensal" && (
+        <div className="nx-bp-charts" style={{ marginTop: 14 }}>
+          <div className="card">
+            <div className="nx-cardhead">
+              <h2 className="type-h2" style={{ margin: 0 }}>
+                Realizado mensal × limite
+              </h2>
+              <div className="nx-legend" style={{ margin: 0 }}>
+                <span>
+                  <i style={{ background: "hsl(222 47% 30%)" }} /> Dentro do
+                  limite
+                </span>
+                <span>
+                  <i style={{ background: "hsl(var(--status-ruptura))" }} />{" "}
+                  Estourou
+                </span>
+                <span>
+                  <i style={{ background: "hsl(var(--primary))" }} /> Limite
+                </span>
               </div>
             </div>
             <div
-              className="nx-bp-gauge"
               style={{
-                background: `conic-gradient(${over ? "hsl(var(--status-ruptura))" : "hsl(var(--status-ok))"} ${Math.min(100, pct) * 3.6}deg, hsl(var(--muted)) 0)`,
+                padding: "10px 14px 14px",
+                flex: 1,
+                display: "flex",
+                alignItems: "center",
               }}
             >
-              <div className="nx-bp-gauge-in">
-                <div className="v">{pct.toFixed(0)}%</div>
-                <div className="l">do limite</div>
+              <BpMonthlyChart hist={cfg.hist} limit={cfg.limite} />
+            </div>
+          </div>
+
+          <div className="nx-bp-side">
+            <div className="card nx-bp-sidecard">
+              <div className="nx-bp-sidehead">
+                <Target size={14} /> Composição da aderência
               </div>
+              {(() => {
+                const tot = Math.max(1, lines.length);
+                const segs = [
+                  {
+                    k: "Em linha",
+                    n: naLinha.length,
+                    c: "hsl(var(--status-ok))",
+                  },
+                  {
+                    k: "Acima",
+                    n: acima.length,
+                    c: "hsl(var(--status-ruptura))",
+                  },
+                  {
+                    k: "Abaixo",
+                    n: abaixo.length,
+                    c: "hsl(var(--status-baixo))",
+                  },
+                ];
+                return (
+                  <>
+                    <div className="nx-bp-stack">
+                      {segs
+                        .filter((s) => s.n > 0)
+                        .map((s) => (
+                          <div
+                            key={s.k}
+                            style={{
+                              width: `${(s.n / tot) * 100}%`,
+                              background: s.c,
+                            }}
+                            title={`${s.k}: ${s.n}`}
+                          />
+                        ))}
+                    </div>
+                    <div className="nx-bp-legrows">
+                      {segs.map((s) => (
+                        <div key={s.k} className="nx-bp-legrow">
+                          <span
+                            className="nx-bp-legdot"
+                            style={{ background: s.c }}
+                          />
+                          <span className="nx-bp-leglabel">{s.k}</span>
+                          <span className="nx-bp-legval">{s.n}</span>
+                          <span className="nx-bp-legpct">
+                            {((s.n / tot) * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            <div className="card nx-bp-sidecard">
+              <div className="nx-bp-sidehead">
+                <Scale size={14} /> Realizado × Sugerido
+              </div>
+              {(() => {
+                const mx = Math.max(realizado, sugeridoValor, 1);
+                const cmpRows = [
+                  {
+                    k: "Sugerido",
+                    v: sugeridoValor,
+                    c: "hsl(222 47% 30%)",
+                  },
+                  {
+                    k: "Realizado",
+                    v: realizado,
+                    c:
+                      realizado > sugeridoValor
+                        ? "hsl(var(--status-ruptura))"
+                        : "hsl(var(--status-ok))",
+                  },
+                ];
+                const diff =
+                  sugeridoValor > 0
+                    ? (realizado / sugeridoValor - 1) * 100
+                    : 0;
+                return (
+                  <>
+                    <div className="nx-bp-cmp">
+                      {cmpRows.map((r) => (
+                        <div key={r.k} className="nx-bp-cmprow">
+                          <div className="nx-bp-cmptop">
+                            <span>{r.k}</span>
+                            <span className="mono">
+                              {fmtCompactBRL(r.v)}
+                            </span>
+                          </div>
+                          <div className="nx-bp-cmptrack">
+                            <div
+                              className="nx-bp-cmpfill"
+                              style={{
+                                width: `${(r.v / mx) * 100}%`,
+                                background: r.c,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div
+                      className={`nx-bp-cmpfoot ${diff > 0 ? "over" : "ok"}`}
+                    >
+                      {diff > 0 ? (
+                        <TrendingUp size={13} />
+                      ) : (
+                        <TrendingDown size={13} />
+                      )}
+                      {diff > 0 ? "+" : ""}
+                      {diff.toFixed(0)}% vs. sugerido
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
-          <div className="nx-bp-bar">
-            <div className="nx-bp-bar-fill" style={{ width: `${Math.min(100, pct)}%`, background: over ? "hsl(var(--status-ruptura))" : "hsl(var(--status-ok))" }} />
-          </div>
         </div>
-        <div className="nx-bp-kpis">
-          {[
-            { l: "SKUs com sugestão", v: String(lines.length) },
-            { l: "Aderência média", v: lines.length ? `${(100 - Math.abs(lines.reduce((a, b) => a + b.desvioPct, 0) / lines.length)).toFixed(0)}%` : "—" },
-            { l: "Último mês", v: fmtCompactBRL(meta.hist[meta.hist.length - 1]) },
-          ].map((k) => (
-            <div key={k.l} className="card nx-bp-kpi">
-              <div className="type-caption">{k.l}</div>
-              <div className="type-h2 m-0">{k.v}</div>
-            </div>
-          ))}
+      )}
+
+      {tab === "prod" && (
+        <div
+          className={`card nx-fs nx-listpage-fill mt-3.5${fs ? " is-fs" : ""}`}
+        >
+          {tableBlock(false)}
         </div>
-      </div>
-      <RelTable
-        title={`Linhas de compra — ${buyer}`}
-        cols={[
-          { key: "sku", label: "SKU", mono: true, width: 80 },
-          { key: "nome", label: "Produto", truncate: true },
-          { key: "forn", label: "Fornecedor", width: 180, truncate: true },
-          { key: "sugerido", label: "Sugerido", align: "right", width: 80 },
-          { key: "comprado", label: "Comprado", align: "right", width: 90 },
-          { key: "valor", label: "Valor", align: "right", width: 110, render: (r) => fmtBRL(r.valor as number) },
-          { key: "desvioPct", label: "Desvio %", align: "right", width: 90, render: (r) => `${(r.desvioPct as number).toFixed(0)}%` },
-        ]}
-        rows={lines}
+      )}
+
+      {fs && (
+        <div
+          className="card nx-fs is-fs"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          {tableBlock(true)}
+        </div>
+      )}
+
+      <BpDesvioDrawer
+        line={drawerLine}
+        buyer={buyer}
+        onClose={() => setDrawerLine(null)}
+        onFull={drawerToDetalhe}
       />
     </div>
   );

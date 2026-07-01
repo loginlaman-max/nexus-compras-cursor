@@ -95,7 +95,7 @@ export function buildSupplierRows(filialId: string): SupplierRow[] {
     if (!byForn[k]) {
       byForn[k] = {
         fornKey: k,
-        code: p.fornCnpj.replace(/\D/g, ""),
+        code: (p.fornCnpj ?? "").replace(/\D/g, ""),
         name: p.forn,
         total: 0,
         excesso: 0,

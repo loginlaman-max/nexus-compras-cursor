@@ -1,7 +1,6 @@
 import {
   catalogSel,
   drpSugestoes,
-  PEDIDOS_COMPRA,
   savingPorFornecedor,
   sugerido,
   valorEstoque,
@@ -168,21 +167,18 @@ export function iaResponder(q: string, filialId: string): IaResposta {
   }
 
   if (/aprova|alçada|alcada|pendente/.test(t)) {
-    const fila = PEDIDOS_COMPRA.filter((p) => p.st === "aguardando");
-    const val = fila.reduce((a, p) => a + p.valor, 0);
     return {
-      texto: `Há ${fila.length} pedido(s) aguardando sua aprovação, somando ${fmtBRL(val)} acima da alçada dos compradores.`,
+      texto:
+        "A fila de aprovações mostra pedidos acima da alçada do comprador. Abra Aprovações para revisar e decidir.",
       itens: [],
-      acoes: fila.length
-        ? [
-            {
-              label: "Abrir fila de Aprovações",
-              icon: "arrow-up-right",
-              tipo: "nav",
-              rota: "aprovacoes",
-            },
-          ]
-        : [],
+      acoes: [
+        {
+          label: "Abrir fila de Aprovações",
+          icon: "arrow-up-right",
+          tipo: "nav",
+          rota: "aprovacoes",
+        },
+      ],
     };
   }
 

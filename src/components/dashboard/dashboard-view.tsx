@@ -6,16 +6,18 @@ import { AnnualBarChart } from "@/components/dashboard/annual-bar-chart";
 import { DashboardKpisGrid } from "@/components/dashboard/dashboard-kpis";
 import { SupplierAnalysisTable } from "@/components/dashboard/supplier-analysis-table";
 import { useShell } from "@/components/providers/shell-provider";
+import { useCatalog } from "@/components/providers/catalog-provider";
 import { activeProdutos } from "@/lib/catalog";
 import { buildAnnualData, getDashboardKpis } from "@/lib/dashboard-data";
 import { FILIAIS } from "@/lib/mock";
 
 export function DashboardView() {
   const { filial } = useShell();
+  const { loaded } = useCatalog();
 
-  const annualData = useMemo(() => buildAnnualData(filial), [filial]);
-  const kpis = useMemo(() => getDashboardKpis(filial), [filial]);
-  const escopo = useMemo(() => activeProdutos(filial), [filial]);
+  const annualData = useMemo(() => buildAnnualData(filial), [filial, loaded]);
+  const kpis = useMemo(() => getDashboardKpis(filial), [filial, loaded]);
+  const escopo = useMemo(() => activeProdutos(filial), [filial, loaded]);
   const filObj = FILIAIS.find((f) => f.id === filial);
 
   return (

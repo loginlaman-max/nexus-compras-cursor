@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Download,
@@ -111,6 +111,10 @@ export function ProdutosAComprarPageView() {
   const selTotal = selRows.reduce((a, r) => a + r.sugerido * r.preco, 0);
   const selQtd = selRows.reduce((a, r) => a + r.sugerido, 0);
   const pager = usePager(rows, 12);
+
+  useEffect(() => {
+    pager.reset();
+  }, [fStatus, fForn, filial]);
 
   const filObj = FILIAIS.find((f) => f.id === filial);
   const showDrp = filial !== "matriz" && filial !== "todas";
@@ -415,14 +419,17 @@ export function ProdutosAComprarPageView() {
             </tbody>
           </table>
         </div>
-        {rows.length > 0 && (
-          <TablePager
-            {...pager}
-            unitLabel="SKUs"
-            onPage={pager.setPage}
-            onPer={pager.setPer}
-          />
-        )}
+        <TablePager
+          from={pager.from}
+          to={pager.to}
+          total={pager.total}
+          page={pager.page}
+          totalPages={pager.totalPages}
+          per={pager.per}
+          unitLabel="SKUs"
+          onPage={pager.setPage}
+          onPer={pager.setPer}
+        />
       </div>
     </div>
   );

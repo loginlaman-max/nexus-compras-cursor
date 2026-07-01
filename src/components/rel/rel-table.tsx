@@ -35,6 +35,10 @@ interface RelTableProps<T extends Record<string, unknown>> {
   onRowClick?: (row: T) => void;
   perDefault?: number;
   title?: string;
+  /** `listpage` = mesmo padrão de Gestão de Fornecedores (nx-fs + tbl-otif) */
+  layout?: "rel" | "listpage";
+  unitLabel?: string;
+  searchPlaceholder?: string;
 }
 
 export function RelTable<T extends Record<string, unknown>>({
@@ -46,6 +50,9 @@ export function RelTable<T extends Record<string, unknown>>({
   onRowClick,
   perDefault = 12,
   title,
+  layout = "rel",
+  unitLabel,
+  searchPlaceholder,
 }: RelTableProps<T>) {
   const [sort, setSort] = useState<{ key: string | null; dir: number }>({
     key: null,
@@ -108,53 +115,101 @@ export function RelTable<T extends Record<string, unknown>>({
     );
   }
 
-  return (
-    <div className={`card nx-rel-results${fs ? " is-fs" : ""}`}>
-      <div className="nx-rel-results-head">
-        <h2 className="type-h2 m-0">
-          {title ?? `Resultados — ${sorted.length} produtos`}
-        </h2>
+  const isList = layout === "listpage";
+  const cardCls = isList
+    ? `card nx-fs nx-listpage-fill mt-3.5${fs ? " is-fs" : ""}`
+    : `card nx-rel-results${fs ? " is-fs" : ""}`;
+
+  const toolbar = isList ? (
+    <div className="nx-cc-toolbar">
+      <div className="nx-cc-tooltitle">
+        {title ?? `Resultados — ${sorted.length}`}
         {activeLabel && (
-          <span className="nx-rel-activefilter">
-            <Filter className="size-2.5" /> {activeLabel}
+          <span className="nx-rel-activefilter" style={{ marginLeft: 8 }}>
+            <Filter size={11} /> {activeLabel}
             <button type="button" className="nx-rel-clear" onClick={onClear}>
-              <X className="size-2.5" />
+              <X size={11} />
             </button>
           </span>
         )}
-        <div className="flex-1" />
-        <button
-          type="button"
-          className="nx-rowbtn nx-rel-expand"
-          title={fs ? "Recolher" : "Expandir"}
-          onClick={() => setFs((v) => !v)}
-        >
-          {fs ? (
-            <Minimize2 className="size-3.5" />
-          ) : (
-            <Maximize2 className="size-3.5" />
-          )}
-        </button>
-        {csv && (
-          <button type="button" className="btn btn-secondary">
-            <Download className="size-3.5" /> CSV
-          </button>
-        )}
-        <label className="field" style={{ width: 280 }}>
-          <Search className="size-3.5 shrink-0 text-muted-foreground" />
-          <Input
-            placeholder="Pesquisar produto, categoria..."
-            value={q}
-            onChange={(e) => {
-              setQ(e.target.value);
-              setPage(1);
-            }}
-            className="h-auto border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
-          />
-        </label>
       </div>
-      <div className="nx-tblscroll nx-rel-scroll">
-        <table className="tbl tbl-rel">
+      <div style={{ flex: 1 }} />
+      <button
+        type="button"
+        className="nx-rowbtn"
+        title={fs ? "Recolher" : "Expandir"}
+        onClick={() => setFs((v) => !v)}
+      >
+        {fs ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+      </button>
+      {csv && (
+        <button type="button" className="btn btn-secondary">
+          <Download size={14} /> CSV
+        </button>
+      )}
+      <label className="field" style={{ width: 240 }}>
+        <Search size={13} />
+        <input
+          placeholder={searchPlaceholder ?? "Pesquisar..."}
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setPage(1);
+          }}
+        />
+      </label>
+    </div>
+  ) : (
+    <div className="nx-rel-results-head">
+      <h2 className="type-h2 m-0">
+        {title ?? `Resultados — ${sorted.length} produtos`}
+      </h2>
+      {activeLabel && (
+        <span className="nx-rel-activefilter">
+          <Filter className="size-2.5" /> {activeLabel}
+          <button type="button" className="nx-rel-clear" onClick={onClear}>
+            <X className="size-2.5" />
+          </button>
+        </span>
+      )}
+      <div className="flex-1" />
+      <button
+        type="button"
+        className="nx-rowbtn nx-rel-expand"
+        title={fs ? "Recolher" : "Expandir"}
+        onClick={() => setFs((v) => !v)}
+      >
+        {fs ? (
+          <Minimize2 className="size-3.5" />
+        ) : (
+          <Maximize2 className="size-3.5" />
+        )}
+      </button>
+      {csv && (
+        <button type="button" className="btn btn-secondary">
+          <Download className="size-3.5" /> CSV
+        </button>
+      )}
+      <label className="field" style={{ width: 280 }}>
+        <Search className="size-3.5 shrink-0 text-muted-foreground" />
+        <Input
+          placeholder={searchPlaceholder ?? "Pesquisar produto, categoria..."}
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setPage(1);
+          }}
+          className="h-auto border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+        />
+      </label>
+    </div>
+  );
+
+  return (
+    <div className={cardCls}>
+      {toolbar}
+      <div className={isList ? "nx-tblscroll" : "nx-tblscroll nx-rel-scroll"}>
+        <table className={isList ? "tbl tbl-otif" : "tbl tbl-rel"}>
           <thead>
             <tr>
               {cols.map((c) => {
@@ -246,6 +301,7 @@ export function RelTable<T extends Record<string, unknown>>({
         page={safePage}
         totalPages={totalPages}
         per={per}
+        unitLabel={unitLabel}
         onPage={setPage}
         onPer={(n) => {
           setPer(n);

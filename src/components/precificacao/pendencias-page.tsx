@@ -20,6 +20,7 @@ import {
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
+import { isDemoMode } from "@/lib/supabase/env";
 import {
   activeProdutos,
   custoEf,
@@ -252,6 +253,7 @@ export function PendenciasPageView() {
   const [q, setQ] = useState("");
 
   const seed = useMemo(() => {
+    if (!isDemoMode()) return [];
     let s = nxStore.get<PendItem[] | null>(SEED_KEY, null);
     if (!s) {
       s = buildSeed();

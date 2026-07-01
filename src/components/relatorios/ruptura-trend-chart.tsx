@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { fmtBRL } from "@/lib/format";
 import {
-  RUP_TREND,
+  getRupturaTrend,
   rupturaPeriodRange,
   type RupPeriodo,
   type RupTrendPoint,
@@ -16,8 +16,9 @@ interface RupturaTrendChartProps {
 
 export function RupturaTrendChart({
   periodo,
-  trend = RUP_TREND,
+  trend: trendProp,
 }: RupturaTrendChartProps) {
+  const trend = trendProp ?? getRupturaTrend();
   const [hover, setHover] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -32,8 +33,11 @@ export function RupturaTrendChart({
   const maxPerda = 30000;
   const bw = 5;
   const n = trend.length;
+  if (n === 0) return null;
+
   const grp = cW / n;
-  const [rangeMin, rangeMax] = rupturaPeriodRange(periodo);
+  const [rangeMin, rangeMax] =
+    n <= 1 ? ([0, 0] as [number, number]) : rupturaPeriodRange(periodo);
 
   const x = (i: number) => padL + i * grp + grp / 2;
   const yP = (v: number) => padT + cH - (v / maxPerda) * cH;

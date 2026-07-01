@@ -1,3 +1,4 @@
+import { isDemoMode } from "@/lib/supabase/env";
 import { COMPRADORES, FORNECEDORES, PRODUTOS, type FornKey } from "./products-data";
 
 export type PedidoStatus =
@@ -128,4 +129,10 @@ export function buildPedidosCompra(): PedidoCompra[] {
   return out.sort((a, b) => b.emissao.getTime() - a.emissao.getTime());
 }
 
-export const PEDIDOS_COMPRA = buildPedidosCompra();
+export function getPedidosCompraDemo(): PedidoCompra[] {
+  if (!isDemoMode()) return [];
+  return buildPedidosCompra();
+}
+
+/** @deprecated use getPedidosCompraDemo() ou fetchPedidosCompra — vazio em produção */
+export const PEDIDOS_COMPRA: PedidoCompra[] = [];

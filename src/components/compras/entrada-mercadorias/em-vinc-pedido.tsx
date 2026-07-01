@@ -12,20 +12,20 @@ import {
 import type { EmNota } from "@/lib/entrada/em-data";
 import type { PedidoCompra } from "@/lib/catalog/pedidos-data";
 import {
-  getAllPedidos,
   statusEfetivo,
 } from "@/lib/catalog/pedidos-utils";
 import { fmtBRL } from "@/lib/format";
 
 interface EmVincPedidoProps {
   nota: EmNota;
+  pedidos: PedidoCompra[];
   onPick: (pedido: PedidoCompra) => void;
   onClose: () => void;
 }
 
 const ABERTOS = ["aprovado", "aguardando", "transito"] as const;
 
-export function EmVincPedido({ nota, onPick, onClose }: EmVincPedidoProps) {
+export function EmVincPedido({ nota, pedidos, onPick, onClose }: EmVincPedidoProps) {
   const [q, setQ] = useState("");
 
   useEffect(() => {
@@ -36,7 +36,7 @@ export function EmVincPedido({ nota, onPick, onClose }: EmVincPedidoProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const todos = getAllPedidos();
+  const todos = pedidos;
   const doForn = todos.filter(
     (p) =>
       p.fornKey === nota.fornKey &&

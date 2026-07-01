@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import {
   Gauge,
@@ -10,6 +11,7 @@ import {
   Target,
 } from "lucide-react";
 import { useShell } from "@/components/providers/shell-provider";
+import { useCatalog } from "@/components/providers/catalog-provider";
 import { RelBanner } from "@/components/rel/rel-banner";
 import {
   activeProdutos,
@@ -96,8 +98,9 @@ function Donut({
 
 export function PainelView() {
   const { filial } = useShell();
+  const { loaded } = useCatalog();
   const filialId = filial === "matriz" || filial === "todas" ? "pa" : filial;
-  const prods = activeProdutos(filialId);
+  const prods = useMemo(() => activeProdutos(filialId), [filialId, loaded]);
   const total = prods.length;
 
   const byStatus: Record<string, number> = {};

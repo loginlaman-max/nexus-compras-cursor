@@ -4,6 +4,12 @@ import {
   PRODUTOS,
   type FornKey,
 } from "./products-data";
+import {
+  fornecedorKeys,
+  getFornecedor,
+  getLiveProducts,
+} from "./runtime";
+import { isDemoMode } from "@/lib/supabase/env";
 
 export const MESES12 = [
   "Jul/25",
@@ -118,7 +124,16 @@ function buildPedidos(): PedidoOtif[] {
   return out;
 }
 
-export const PEDIDOS_OTIF = buildPedidos();
+let _demoPedidos: PedidoOtif[] | null = null;
+
+export function getPedidosOtif(): PedidoOtif[] {
+  if (!isDemoMode()) return [];
+  if (!_demoPedidos) _demoPedidos = buildPedidos();
+  return _demoPedidos;
+}
+
+/** @deprecated use getPedidosOtif() — vazio em produção */
+export const PEDIDOS_OTIF: PedidoOtif[] = [];
 
 export interface OtifGeral {
   ot: number;
@@ -128,25 +143,27 @@ export interface OtifGeral {
   foraOtif: number;
 }
 
-export function otifGeral(pedidos: PedidoOtif[] = PEDIDOS_OTIF): OtifGeral {
-  const n = pedidos.length;
+export function otifGeral(pedidos?: PedidoOtif[]): OtifGeral {
+  const list = pedidos ?? getPedidosOtif();
+  const n = list.length;
   if (n === 0) {
     return { ot: 0, inf: 0, otif: 0, pedidos: 0, foraOtif: 0 };
   }
-  const ot = (pedidos.filter((o) => o.onTime).length / n) * 100;
-  const inf = (pedidos.filter((o) => o.inFull).length / n) * 100;
+  const ot = (list.filter((o) => o.onTime).length / n) * 100;
+  const inf = (list.filter((o) => o.inFull).length / n) * 100;
   return {
     ot: +ot.toFixed(1),
     inf: +inf.toFixed(1),
     otif: +((ot * inf) / 100).toFixed(1),
     pedidos: n,
-    foraOtif: pedidos.filter((o) => !(o.onTime && o.inFull)).length,
+    foraOtif: list.filter((o) => !(o.onTime && o.inFull)).length,
   };
 }
 
-export function otifTrend(pedidos: PedidoOtif[] = PEDIDOS_OTIF) {
+export function otifTrend(pedidos?: PedidoOtif[]) {
+  const list = pedidos ?? getPedidosOtif();
   return MESES12.map((m) => {
-    const ped = pedidos.filter((o) => o.mes === m);
+    const ped = list.filter((o) => o.mes === m);
     if (!ped.length) return { m, otif: 0, ot: 0, inf: 0 };
     const ot = (ped.filter((o) => o.onTime).length / ped.length) * 100;
     const inf = (ped.filter((o) => o.inFull).length / ped.length) * 100;
@@ -175,7 +192,7 @@ export function periodoRangeOtif(periodo: string): [number, number] {
 
 export function filtrarPedidosOtifPorPeriodo(periodo: string): PedidoOtif[] {
   const [minIdx, maxIdx] = periodoRangeOtif(periodo);
-  let ped = PEDIDOS_OTIF.filter(
+  let ped = getPedidosOtif().filter(
     (o) => o.mesIdx >= minIdx && o.mesIdx <= maxIdx,
   );
   if (periodo === "7 dias") {
@@ -223,13 +240,12 @@ export interface SavingFornRow {
   pct: number;
 }
 
-export function savingPorFornecedor(
-  pedidos: PedidoOtif[] = PEDIDOS_OTIF,
-): SavingFornRow[] {
+export function savingPorFornecedor(pedidos?: PedidoOtif[]): SavingFornRow[] {
+  const list = pedidos ?? getPedidosOtif();
   const map: Record<string, SavingFornRow & { baseline: number; negociado: number }> =
     {};
 
-  pedidos.forEach((o) => {
+  list.forEach((o) => {
     if (!map[o.fornKey]) {
       map[o.fornKey] = {
         fornKey: o.fornKey,
@@ -259,11 +275,34 @@ export function savingPorFornecedor(
     .sort((a, b) => b.saving - a.saving);
 }
 
-export function otifPorFornecedor(pedidos: PedidoOtif[] = PEDIDOS_OTIF) {
+export interface OtifFornRow {
+  fornKey: string;
+  cod: string;
+  nome: string;
+  cnpj: string;
+  comprador: string;
+  pedidos: number;
+  otCount: number;
+  infCount: number;
+  ot: number;
+  inf: number;
+  otif: number;
+}
+
+function codFornecedorOtif(fornKey: string): string {
+  const cnpj = getFornecedor(fornKey)?.cnpj ?? "";
+  const digits = cnpj.replace(/\D/g, "");
+  if (digits.length >= 6) return digits.slice(0, 8);
+  const prod = getLiveProducts().find((p) => p.fornKey === fornKey);
+  return prod?.codForn ?? fornKey;
+}
+
+export function otifPorFornecedor(pedidos?: PedidoOtif[]): OtifFornRow[] {
+  const list = pedidos ?? getPedidosOtif();
   const map: Record<
     string,
     {
-      fornKey: FornKey;
+      fornKey: string;
       nome: string;
       cnpj: string;
       comprador: string;
@@ -273,7 +312,7 @@ export function otifPorFornecedor(pedidos: PedidoOtif[] = PEDIDOS_OTIF) {
     }
   > = {};
 
-  pedidos.forEach((o) => {
+  list.forEach((o) => {
     if (!map[o.fornKey]) {
       map[o.fornKey] = {
         fornKey: o.fornKey,
@@ -291,25 +330,46 @@ export function otifPorFornecedor(pedidos: PedidoOtif[] = PEDIDOS_OTIF) {
     if (o.inFull) g.inf += 1;
   });
 
-  return Object.values(map)
-    .map((g) => {
-      const otPct = (g.ot / g.pedidos) * 100;
-      const infPct = (g.inf / g.pedidos) * 100;
+  const keys = fornecedorKeys();
+  const mergedKeys = [
+    ...new Set([...keys, ...Object.keys(map)]),
+  ] as string[];
+
+  return mergedKeys
+    .map((fornKey) => {
+      const forn = getFornecedor(fornKey);
+      const g = map[fornKey];
+      const pedidosN = g?.pedidos ?? 0;
+      const otCount = g?.ot ?? 0;
+      const infCount = g?.inf ?? 0;
+      const otPct = pedidosN > 0 ? (otCount / pedidosN) * 100 : 0;
+      const infPct = pedidosN > 0 ? (infCount / pedidosN) * 100 : 0;
+      const comprador =
+        g?.comprador ??
+        getLiveProducts().find((p) => p.fornKey === fornKey)?.comprador ??
+        COMPRADORES[0];
+
       return {
-        ...g,
-        otCount: g.ot,
-        infCount: g.inf,
+        fornKey,
+        cod: codFornecedorOtif(fornKey),
+        nome: g?.nome ?? forn?.nome ?? fornKey,
+        cnpj: g?.cnpj ?? forn?.cnpj ?? "—",
+        comprador,
+        pedidos: pedidosN,
+        otCount,
+        infCount,
         ot: +otPct.toFixed(1),
         inf: +infPct.toFixed(1),
         otif: +((otPct * infPct) / 100).toFixed(1),
       };
     })
-    .sort((a, b) => b.pedidos - a.pedidos);
+    .sort((a, b) => b.pedidos - a.pedidos || a.nome.localeCompare(b.nome, "pt-BR"));
 }
 
-export function savingTrend(pedidos: PedidoOtif[] = PEDIDOS_OTIF) {
+export function savingTrend(pedidos?: PedidoOtif[]) {
+  const list = pedidos ?? getPedidosOtif();
   return MESES12.map((m) => {
-    const ped = pedidos.filter((o) => o.mes === m);
+    const ped = list.filter((o) => o.mes === m);
     const val = ped.reduce(
       (a, o) => a + o.qtdPedida * (o.precoTabela - o.precoNegociado),
       0,
@@ -349,7 +409,8 @@ export function savingTrendForPeriod(
 }
 
 export function savingMetaAnual(): number {
-  const total = PEDIDOS_OTIF.reduce(
+  if (!isDemoMode()) return 0;
+  const total = getPedidosOtif().reduce(
     (a, o) => a + o.qtdPedida * (o.precoTabela - o.precoNegociado),
     0,
   );
@@ -358,7 +419,7 @@ export function savingMetaAnual(): number {
 
 export function filtrarPedidosPorPeriodo(periodo: string): PedidoOtif[] {
   const [minIdx, maxIdx] = periodoRange(periodo);
-  return PEDIDOS_OTIF.filter(
+  return getPedidosOtif().filter(
     (o) => o.mesIdx >= minIdx && o.mesIdx <= maxIdx,
   );
 }

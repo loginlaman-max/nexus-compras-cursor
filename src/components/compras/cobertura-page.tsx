@@ -1,16 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Box, Building2, Layers, ShieldCheck, Truck } from "lucide-react";
+import { useCatalog } from "@/components/providers/catalog-provider";
 import { RelBanner } from "@/components/rel/rel-banner";
 import { TablePager } from "@/components/rel/table-pager";
 import {
-  COB_FILIAL_ROWS,
-  COB_FORN_ROWS,
-  COB_PROD_ROWS,
-  COB_SEG_ROWS,
+  getCoberturaFilialRows,
+  getCoberturaFornRows,
+  getCoberturaProdRows,
+  getCoberturaSegRows,
   type CobRow,
-} from "@/lib/mock/cobertura";
+} from "@/lib/cobertura/data";
 
 const TABS = [
   { id: "filial", icon: Building2, label: "COBERTURA POR FILIAL" },
@@ -22,16 +23,20 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 export function CoberturaPageView() {
+  const { loaded } = useCatalog();
   const [tab, setTab] = useState<TabId>("filial");
   const [page, setPage] = useState(1);
   const [per, setPer] = useState(12);
 
-  const data: Record<TabId, CobRow[]> = {
-    filial: COB_FILIAL_ROWS,
-    segmento: COB_SEG_ROWS,
-    fornecedor: COB_FORN_ROWS,
-    produto: COB_PROD_ROWS,
-  };
+  const data: Record<TabId, CobRow[]> = useMemo(
+    () => ({
+      filial: getCoberturaFilialRows(),
+      segmento: getCoberturaSegRows(),
+      fornecedor: getCoberturaFornRows(),
+      produto: getCoberturaProdRows(),
+    }),
+    [loaded],
+  );
   const rows = data[tab];
   const totalPages = Math.max(1, Math.ceil(rows.length / per));
   const safePage = Math.min(page, totalPages);

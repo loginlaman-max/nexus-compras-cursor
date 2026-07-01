@@ -18,18 +18,20 @@ import { RelCards } from "@/components/rel/rel-cards";
 import { TablePager } from "@/components/rel/table-pager";
 import { Input } from "@/components/ui/input";
 import {
-  FORNECEDORES,
+  fornecedorKeys,
+  getFornecedor,
   META_CICLO,
   metaStatus,
   metasStore,
   PRODUTOS,
   valorEstoque,
-  type FornKey,
 } from "@/lib/catalog";
+import { useCatalog } from "@/components/providers/catalog-provider";
 import { fmtCompactBRL } from "@/lib/format";
 
 export function GestaoFornecedoresPageView() {
   const router = useRouter();
+  const { loaded } = useCatalog();
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<"metas" | "comercial">("metas");
   const [fs, setFs] = useState(false);
@@ -42,27 +44,34 @@ export function GestaoFornecedoresPageView() {
     (metasPorForn[m.fornKey] = metasPorForn[m.fornKey] || []).push(m);
   });
 
-  const keys = Object.keys(FORNECEDORES) as FornKey[];
-  const linhas = keys
-    .map((k) => {
-      const prods = PRODUTOS.filter((p) => p.fornKey === k);
-      const ms = metasPorForn[k] || [];
-      const sellIn = ms.find((m) => m.tipo === "sell-in");
-      return {
-        key: k,
-        nome: FORNECEDORES[k].nome,
-        cnpj: FORNECEDORES[k].cnpj,
-        leadTime: FORNECEDORES[k].leadTime,
-        frete: FORNECEDORES[k].frete,
-        skus: prods.length,
-        capital: prods.reduce((a, p) => a + valorEstoque(p), 0),
-        nMetas: ms.length,
-        sellIn,
-        sellInStatus: sellIn ? metaStatus(sellIn) : null,
-      };
-    })
-    .filter((r) => !q || r.nome.toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => b.nMetas - a.nMetas || b.capital - a.capital);
+  const keys = useMemo(() => fornecedorKeys(), [loaded]);
+  const linhas = useMemo(
+    () =>
+      keys
+        .map((k) => {
+          const forn = getFornecedor(k);
+          if (!forn) return null;
+          const prods = PRODUTOS.filter((p) => p.fornKey === k);
+          const ms = metasPorForn[k] || [];
+          const sellIn = ms.find((m) => m.tipo === "sell-in");
+          return {
+            key: k,
+            nome: forn.nome,
+            cnpj: forn.cnpj,
+            leadTime: forn.leadTime,
+            frete: forn.frete,
+            skus: prods.length,
+            capital: prods.reduce((a, p) => a + valorEstoque(p), 0),
+            nMetas: ms.length,
+            sellIn,
+            sellInStatus: sellIn ? metaStatus(sellIn) : null,
+          };
+        })
+        .filter((r): r is NonNullable<typeof r> => r != null)
+        .filter((r) => !q || r.nome.toLowerCase().includes(q.toLowerCase()))
+        .sort((a, b) => b.nMetas - a.nMetas || b.capital - a.capital),
+    [keys, metasPorForn, q],
+  );
 
   const comMeta = linhas.filter((r) => r.nMetas > 0);
   const atrasadas = comMeta.filter(

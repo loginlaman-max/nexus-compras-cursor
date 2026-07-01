@@ -12,15 +12,31 @@ import {
   X,
 } from "lucide-react";
 import { RupturaTrendChart } from "@/components/relatorios/ruptura-trend-chart";
-import { TablePager } from "@/components/rel/table-pager";
-import { usePager } from "@/hooks/use-pager";
 import {
+  SkuQuickDrawer,
+  ctxFromCfg,
+  vendaSerie,
+  type SkuQuickDrawerCfg,
+} from "@/components/rel/sku-quick-drawer";
+import { TablePager } from "@/components/rel/table-pager";
+import { useCatalog } from "@/components/providers/catalog-provider";
+import {
+  openProductFromSku,
+  useCart,
+} from "@/components/providers/cart-provider";
+import { useShell } from "@/components/providers/shell-provider";
+import { usePager } from "@/hooks/use-pager";
+import { PRODUTOS } from "@/lib/catalog";
+import {
+  getRupturaTrend,
   RUP_CHART_TITULO,
   RUP_PERIODOS,
+  rupturaRows,
   type RupPeriodo,
+  type RupRow,
 } from "@/lib/catalog/ruptura-data";
+import { FILIAIS } from "@/lib/mock";
 import { fmtBRL, fmtCompactBRL } from "@/lib/format";
-import { rupturaRows } from "./rel-data";
 
 type CardFilter = "ativa" | "curvaA" | "risco";
 
@@ -30,21 +46,79 @@ const CARD_LABELS: Record<CardFilter, string> = {
   risco: "Risco 7 dias",
 };
 
-const CARD_FILTERS: Record<
-  CardFilter,
-  (r: ReturnType<typeof rupturaRows>[number]) => boolean
-> = {
+const CARD_FILTERS: Record<CardFilter, (r: RupRow) => boolean> = {
   ativa: (r) => r.zerado,
   curvaA: (r) => r.curva === "A",
   risco: (r) => r.critico,
 };
 
+function rupCfg(r: RupRow): SkuQuickDrawerCfg {
+  const p = PRODUTOS.find((x) => x.codInt === r.sku);
+  const { serie, tend } = vendaSerie(
+    p ?? { codInt: r.sku, v90: 0, v12m: 0 },
+  );
+  const diag = r.zerado
+    ? {
+        tone: "over" as const,
+        icon: "alert-triangle",
+        label: "Em ruptura ativa",
+        detail: `Estoque zerado com demanda de ${r.vendaDia}/dia. Perda estimada de ${fmtBRL(r.perda)} até a reposição — repor com urgência para não perder venda.`,
+      }
+    : {
+        tone: "over" as const,
+        icon: "alert-triangle",
+        label: "Risco de ruptura",
+        detail: `Cobertura abaixo do lead time. Ruptura prevista em ${r.dias} dias se não houver reposição.`,
+      };
+
+  return {
+    headerIcon: "alert-triangle",
+    headerTitle: "Análise de ruptura",
+    name: r.nome,
+    meta: `SKU ${r.sku} · ${r.forn}`,
+    hero: [
+      {
+        k: "Dias em ruptura",
+        v: r.dias,
+        color: "hsl(var(--status-ruptura))",
+      },
+      {
+        k: "Perda estimada",
+        v: fmtCompactBRL(r.perda),
+        color: "hsl(var(--status-ruptura))",
+      },
+      { k: "Curva", v: r.curva },
+    ],
+    diag,
+    stats: [
+      { k: "Estoque atual", v: `${p?.est ?? 0} un` },
+      { k: "Venda/dia", v: String(r.vendaDia) },
+      { k: "Compra sugerida", v: `${r.sugerido} un` },
+      { k: "Lead time", v: `${p?.leadTime ?? 7} dias` },
+    ],
+    serie,
+    tend,
+    footer: {
+      label: "Perda projetada (lead time)",
+      value: fmtCompactBRL(r.perda),
+    },
+  };
+}
+
 export function RupturaPageView() {
-  const rowsAll = useMemo(() => rupturaRows(), []);
+  const { filial } = useShell();
+  const { loaded } = useCatalog();
+  const { addToCart, openProductDetail } = useCart();
+
   const [q, setQ] = useState("");
   const [periodo, setPeriodo] = useState<RupPeriodo>("Atual");
   const [card, setCard] = useState<CardFilter>("ativa");
   const [fs, setFs] = useState(false);
+  const [drawerRow, setDrawerRow] = useState<RupRow | null>(null);
+
+  const filObj = FILIAIS.find((f) => f.id === filial);
+  const rowsAll = useMemo(() => rupturaRows(filial), [filial, loaded]);
+  const trend = useMemo(() => getRupturaTrend(rowsAll), [rowsAll]);
 
   const totalPerda = rowsAll.reduce((a, b) => a + b.perda, 0);
   const ativas = rowsAll.filter((r) => r.zerado).length;
@@ -67,9 +141,22 @@ export function RupturaPageView() {
     );
 
   const pager = usePager(rows, 12);
+  const semRuptura = loaded && rowsAll.length === 0;
+
+  function addRowToCart(r: RupRow, e: React.MouseEvent) {
+    e.stopPropagation();
+    const p = PRODUTOS.find((x) => x.codInt === r.sku);
+    addToCart({
+      sku: r.sku,
+      name: r.nome,
+      preco: p?.custo ?? 0,
+      sugerido: r.sugerido,
+      forn: r.forn,
+    });
+  }
 
   return (
-    <div className="nx-rup nx-rep">
+    <div className="nx-rup nx-rep nx-listpage">
       <div className="nx-rel-banner">
         <div className="nx-rel-banner-icon">
           <AlertTriangle size={20} />
@@ -77,7 +164,7 @@ export function RupturaPageView() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="nx-rel-banner-title">Ruptura de Estoque</h1>
           <p className="nx-rel-banner-sub">
-            Perda de venda por falta de produto · Matriz PA
+            Perda de venda por falta de produto · {filObj?.nome ?? "Matriz PA"}
           </p>
         </div>
         <div className="nx-rel-banner-actions">
@@ -157,7 +244,7 @@ export function RupturaPageView() {
         ))}
       </div>
 
-      <div className="card" style={{ marginTop: 14 }}>
+      <div className="card mt-3.5">
         <div className="nx-cardhead">
           <h2 className="type-h2" style={{ margin: 0 }}>
             {RUP_CHART_TITULO}
@@ -170,13 +257,19 @@ export function RupturaPageView() {
           </div>
         </div>
         <div style={{ padding: "10px 14px 14px" }}>
-          <RupturaTrendChart periodo={periodo} />
+          {trend.length === 0 ? (
+            <p className="type-caption py-8 text-center text-muted-foreground">
+              Sem histórico de ruptura — dados aparecerão após sincronização com
+              o ERP.
+            </p>
+          ) : (
+            <RupturaTrendChart periodo={periodo} trend={trend} />
+          )}
         </div>
       </div>
 
       <div
-        className={"card nx-fs" + (fs ? " is-fs" : "")}
-        style={{ marginTop: 14 }}
+        className={`card nx-fs nx-listpage-fill mt-3.5${fs ? " is-fs" : ""}`}
       >
         <div className="nx-cc-toolbar">
           <div className="nx-cc-tooltitle">
@@ -244,7 +337,19 @@ export function RupturaPageView() {
             </thead>
             <tbody>
               {pager.pageItems.map((r) => (
-                <tr key={r.sku} className="nx-row-click">
+                <tr
+                  key={r.sku}
+                  className="nx-row-click"
+                  onClick={(e) => {
+                    if (
+                      (e.target as HTMLElement).closest(
+                        "button,input,a",
+                      )
+                    )
+                      return;
+                    setDrawerRow(r);
+                  }}
+                >
                   <td
                     className="mono"
                     style={{ color: "hsl(var(--muted-foreground))" }}
@@ -308,29 +413,52 @@ export function RupturaPageView() {
                       type="button"
                       className="nx-rowbtn nx-rowbtn-cart"
                       title="Adicionar ao carrinho"
+                      onClick={(e) => addRowToCart(r, e)}
                     >
                       <ShoppingCart size={12} />
                     </button>
                   </td>
                 </tr>
               ))}
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="nx-rel-empty">
+                    {semRuptura
+                      ? "Nenhum SKU em ruptura no momento"
+                      : "Nenhum resultado com os filtros aplicados"}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
-        {rows.length > 0 && (
-          <TablePager
-            from={pager.from}
-            to={pager.to}
-            total={pager.total}
-            page={pager.page}
-            totalPages={pager.totalPages}
-            per={pager.per}
-            unitLabel="SKUs"
-            onPage={pager.setPage}
-            onPer={pager.setPer}
-          />
-        )}
+        <TablePager
+          from={pager.from}
+          to={pager.to}
+          total={pager.total}
+          page={pager.page}
+          totalPages={pager.totalPages}
+          per={pager.per}
+          unitLabel="SKUs"
+          onPage={pager.setPage}
+          onPer={pager.setPer}
+        />
       </div>
+
+      <SkuQuickDrawer
+        cfg={drawerRow ? rupCfg(drawerRow) : null}
+        onClose={() => setDrawerRow(null)}
+        onFull={() => {
+          if (!drawerRow) return;
+          const cfg = rupCfg(drawerRow);
+          const row = drawerRow;
+          setDrawerRow(null);
+          openProductDetail({
+            ...openProductFromSku(row.sku, "ruptura"),
+            desvioCtx: ctxFromCfg(cfg),
+          });
+        }}
+      />
     </div>
   );
 }

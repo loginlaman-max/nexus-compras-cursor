@@ -24,5 +24,7 @@ export function resolveFornKey(
   fornNome: string,
   fornecedores: Record<string, { nome: string }>,
 ): string | undefined {
-  return Object.keys(fornecedores).find((k) => fornecedores[k].nome === fornNome);
+  return Object.keys(fornecedores).find(
+    (k) => fornecedores[k]?.nome === fornNome,
+  );
 }

@@ -2,8 +2,8 @@ import {
   activeProdutos,
   catalogSel,
   custoEf,
+  getPedidosOtif,
   margemRealizada,
-  PEDIDOS_OTIF,
   type Product,
 } from "@/lib/catalog";
 
@@ -216,7 +216,7 @@ export function afAtividade(
   filialId = "matriz",
 ): AfActivityEvent[] {
   const ev: AfActivityEvent[] = [];
-  const peds = [...PEDIDOS_OTIF].sort((a, b) => b.mesIdx - a.mesIdx);
+  const peds = [...getPedidosOtif()].sort((a, b) => b.mesIdx - a.mesIdx);
 
   peds.slice(0, 3).forEach((o) => {
     const v = o.qtdRecebida * o.precoNegociado;

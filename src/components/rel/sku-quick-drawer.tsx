@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { NxIcon } from "@/components/nx/nx-icon";
 import type { Product } from "@/lib/catalog";
 import { tendencia } from "@/lib/catalog/metrics";
+import { isDemoMode } from "@/lib/supabase/env";
 
 const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun"];
 
@@ -32,15 +33,21 @@ export interface SkuQuickDrawerCfg {
 }
 
 export function vendaSerie(p: Pick<Product, "codInt" | "v12m" | "v90"> | null) {
-  const cod = p?.codInt ?? "0";
   const v12 = p?.v12m ?? (p?.v90 != null ? p.v90 * 4 : 0);
   const mean = Math.max(0.4, v12 / 12);
+  const tend = p ? tendencia(p as Product) : "→";
+
+  if (!isDemoMode()) {
+    const serie = MESES.map((m) => ({ m, v: Math.round(mean) }));
+    return { serie, tend };
+  }
+
+  const cod = p?.codInt ?? "0";
   let seed = parseInt(String(cod).replace(/\D/g, ""), 10) || 7;
   const rnd = () => {
     seed = (seed * 1103515245 + 12345) & 0x7fffffff;
     return seed / 0x7fffffff;
   };
-  const tend = p ? tendencia(p as Product) : "→";
   const trend = tend === "↑" ? 1.06 : tend === "↓" ? 0.94 : 1;
   let cur = mean * 0.85;
   const serie = MESES.map((m) => {

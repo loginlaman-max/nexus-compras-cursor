@@ -20,7 +20,9 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
+import { useOrg } from "@/components/providers/org-provider";
 import { FILIAIS, type Filial } from "@/lib/mock";
+import { isDemoMode } from "@/lib/supabase/env";
 import { nxStore } from "@/lib/store/nx-store";
 import { SetDialog, SetHeader } from "./config-shared";
 
@@ -92,6 +94,8 @@ export function SetIntegracoes({
   onManage?: (it: { nome: string; filial?: string }) => void;
   onSaved?: (msg: string) => void;
 }) {
+  const { activeOrg } = useOrg();
+  const demo = isDemoMode();
   const [tab, setTab] = useState<"catalogo" | "instalacoes">("catalogo");
   const [connect, setConnect] = useState<{ filialId: string } | null>(null);
   const conectadas = FILIAIS.filter(
@@ -473,13 +477,18 @@ export function SetIntegracoes({
           onSave={
             connect.filialId
               ? () => {
-                  onManage?.({
-                    nome: "Bling ERP v3",
-                    filial:
-                      FILIAIS.find((f) => f.id === connect.filialId)?.nome ??
-                      "",
-                  });
-                  setConnect(null);
+                  if (demo) {
+                    onManage?.({
+                      nome: "Bling ERP v3",
+                      filial:
+                        FILIAIS.find((f) => f.id === connect.filialId)?.nome ??
+                        "",
+                    });
+                    setConnect(null);
+                    return;
+                  }
+                  const url = `/api/bling/authorize?org_id=${encodeURIComponent(activeOrg.orgId)}&filial_id=${encodeURIComponent(connect.filialId)}`;
+                  window.location.href = url;
                 }
               : null
           }

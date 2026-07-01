@@ -94,9 +94,10 @@ export function SupplierAnalysisTable({ filialId }: SupplierAnalysisTableProps) 
 
   const rows = allRows.filter(
     (r) =>
-      !q ||
-      r.name.toLowerCase().includes(q.toLowerCase()) ||
-      r.code.includes(q),
+      r &&
+      (!q ||
+        (r.name ?? "").toLowerCase().includes(q.toLowerCase()) ||
+        (r.code ?? "").includes(q)),
   );
 
   const totalRow = rows.find((r) => r.isTotal);
