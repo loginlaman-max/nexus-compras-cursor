@@ -186,10 +186,16 @@ export function BlingPageView({
     ...defaultWebhooks(),
     ...nxStore.get<Record<string, boolean>>("bling_webhooks", {}),
   }));
-  const [whAcoes, setWhAcoes] = useState<WhAcoes>(() => ({
-    ...defaultWhAcoes(),
-    ...nxStore.get<Partial<WhAcoes>>("bling_wh_acoes", {}),
-  }));
+  const [whAcoes, setWhAcoes] = useState<WhAcoes>(() => {
+    const base = defaultWhAcoes();
+    const saved = nxStore.get<Partial<WhAcoes>>("bling_wh_acoes", {});
+    const merged: WhAcoes = { ...base };
+    for (const key of Object.keys(base)) {
+      const patch = saved[key];
+      if (patch) merged[key] = { ...base[key], ...patch };
+    }
+    return merged;
+  });
 
   const redirectUri =
     typeof window !== "undefined"
