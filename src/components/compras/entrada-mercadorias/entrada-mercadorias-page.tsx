@@ -32,8 +32,6 @@ import {
 import { EmVincPedido } from "@/components/compras/entrada-mercadorias/em-vinc-pedido";
 import type { PedidoCompra } from "@/lib/catalog/pedidos-data";
 import {
-  EM_NOTAS,
-  EM_NOTAS_ORFAS,
   EM_STEPS,
   emMetricas,
   type EmDecisao,
@@ -41,6 +39,10 @@ import {
   type EmVinculo,
   type EmWizardState,
 } from "@/lib/entrada/em-data";
+import {
+  fetchEmNotasFromSupabase,
+  filterLegacyMockNotas,
+} from "@/lib/entrada/em-supabase";
 import { pushHistoricoExport } from "@/lib/entrada/hn-data";
 import { uploadNfeXml } from "@/lib/entrada/nfe-api";
 import { nxStore } from "@/lib/store/nx-store";
@@ -83,14 +85,28 @@ export function EntradaMercadoriasPageView() {
   const [vincs, setVincs] = useState<Record<string, EmVinculo>>(saved.vincs);
   const [pickOpen, setPickOpen] = useState(false);
   const [extraNotas, setExtraNotas] = useState<EmNota[]>(() =>
-    nxStore.get("em_extra_notas", []),
+    filterLegacyMockNotas(nxStore.get("em_extra_notas", [])),
   );
+  const [remoteNotas, setRemoteNotas] = useState<EmNota[]>([]);
   const [xmlLoading, setXmlLoading] = useState(false);
 
-  const allNotas = useMemo(
-    () => [...EM_NOTAS, ...EM_NOTAS_ORFAS, ...extraNotas],
-    [extraNotas],
-  );
+  const reloadNotas = useCallback(async () => {
+    if (!activeOrg?.orgId) return;
+    const fromDb = await fetchEmNotasFromSupabase(activeOrg.orgId);
+    setRemoteNotas(fromDb);
+  }, [activeOrg?.orgId]);
+
+  useEffect(() => {
+    void reloadNotas();
+  }, [reloadNotas]);
+
+  const allNotas = useMemo(() => {
+    const byId = new Map<string, EmNota>();
+    for (const n of [...remoteNotas, ...extraNotas]) {
+      byId.set(n.id, n);
+    }
+    return Array.from(byId.values());
+  }, [remoteNotas, extraNotas]);
   const nota = allNotas.find((n) => n.id === notaId) ?? null;
   const vinc = nota ? (vincs[nota.id] ?? null) : null;
   const semPedido =
@@ -280,6 +296,7 @@ export function EntradaMercadoriasPageView() {
           );
         } else if (result.persisted) {
           toast.success(`NF-e ${nota.nf} importada e salva no Supabase`);
+          await reloadNotas();
         } else {
           toast.success(`NF-e ${nota.nf} carregada · ${nota.items.length} itens`);
         }
@@ -289,7 +306,7 @@ export function EntradaMercadoriasPageView() {
         setXmlLoading(false);
       }
     },
-    [activeOrg?.orgId],
+    [activeOrg?.orgId, reloadNotas],
   );
 
   return (
@@ -323,7 +340,11 @@ export function EntradaMercadoriasPageView() {
           ) : (
             <div className="nx-em-banner-nf">
               <span className="k">Fila de entrada</span>
-              <span className="v">{EM_NOTAS.length} notas aguardando</span>
+              <span className="v">
+                {allNotas.length === 0
+                  ? "Nenhuma nota — importe um XML"
+                  : `${allNotas.length} nota${allNotas.length === 1 ? "" : "s"} aguardando`}
+              </span>
             </div>
           )}
         </div>

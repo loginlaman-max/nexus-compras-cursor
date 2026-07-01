@@ -57,6 +57,9 @@
 .nx-em-fila-row:last-child { border-bottom: 0; }
 .nx-em-fila-row:hover { background: hsl(var(--muted) / .5); }
 .nx-em-fila-row.is-sel { background: hsl(var(--primary) / .06); box-shadow: inset 3px 0 0 hsl(var(--primary)); }
+.nx-em-fila-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 40px 20px; text-align: center; color: hsl(var(--muted-foreground)); }
+.nx-em-fila-empty p { margin: 0; font-size: 14px; font-weight: 600; color: hsl(var(--foreground)); }
+.nx-em-fila-empty span { font-size: 12px; }
 .nx-em-fila-rad { color: hsl(var(--muted-foreground)); flex-shrink: 0; display: inline-flex; }
 .nx-em-fila-row.is-sel .nx-em-fila-rad { color: hsl(var(--primary)); }
 .nx-em-fila-main { flex: 1; min-width: 0; font-size: 13px; color: hsl(var(--foreground)); line-height: 1.4; }

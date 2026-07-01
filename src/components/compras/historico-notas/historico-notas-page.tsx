@@ -1,23 +1,56 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Archive, FileDown, Truck } from "lucide-react";
 import { HnNotaDrawer } from "@/components/compras/historico-notas/hn-nota-drawer";
 import { HnSitPill } from "@/components/compras/historico-notas/hn-sit-pill";
 import { RelShell } from "@/components/rel/rel-shell";
 import type { RelColumn } from "@/components/rel/rel-table";
-import { getHistoricoData, type HnCteRow, type HnNfeRow } from "@/lib/entrada/hn-data";
+import { useOrg } from "@/components/providers/org-provider";
+import {
+  getLocalHistoricoExports,
+  type HnCteRow,
+  type HnNfeRow,
+} from "@/lib/entrada/hn-data";
+import { fetchHistoricoFromSupabase } from "@/lib/entrada/em-supabase";
 import { fmtBRL } from "@/lib/format";
 
 type NfeRow = HnNfeRow & Record<string, unknown>;
 type CteRow = HnCteRow & Record<string, unknown>;
 
+function mergeHistorico(
+  remote: { nfes: HnNfeRow[]; ctes: HnCteRow[] },
+  local: HnNfeRow[],
+) {
+  const byId = new Map<string, HnNfeRow>();
+  for (const n of [...local, ...remote.nfes]) {
+    byId.set(n.id, n);
+  }
+  const nfes = Array.from(byId.values()).sort(
+    (a, b) => b.dataSort - a.dataSort,
+  );
+  return { nfes, ctes: remote.ctes };
+}
+
 export function HistoricoNotasPageView() {
+  const { activeOrg } = useOrg();
   const [aba, setAba] = useState<"nfe" | "cte">("nfe");
   const [drawer, setDrawer] = useState<HnNfeRow | HnCteRow | null>(null);
+  const [remote, setRemote] = useState<{ nfes: HnNfeRow[]; ctes: HnCteRow[] }>({
+    nfes: [],
+    ctes: [],
+  });
   const isNfe = aba === "nfe";
 
-  const { nfes, ctes } = useMemo(() => getHistoricoData(), []);
+  useEffect(() => {
+    if (!activeOrg?.orgId) return;
+    fetchHistoricoFromSupabase(activeOrg.orgId).then(setRemote);
+  }, [activeOrg?.orgId]);
+
+  const { nfes, ctes } = useMemo(
+    () => mergeHistorico(remote, getLocalHistoricoExports()),
+    [remote],
+  );
 
   const colsNfe: RelColumn<NfeRow>[] = [
     {

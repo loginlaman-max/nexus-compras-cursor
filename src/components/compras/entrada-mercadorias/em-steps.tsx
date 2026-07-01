@@ -163,7 +163,14 @@ export function EmEntrada({
           <Inbox className="size-3.5" /> Notas na fila de entrada{" "}
           <span className="nx-em-fila-n">{notas.length}</span>
         </div>
-        {notas.map((n) => (
+        {notas.length === 0 ? (
+          <div className="nx-em-fila-empty">
+            <Inbox className="size-8 opacity-40" />
+            <p>Nenhuma NF-e na fila</p>
+            <span>Importe um XML para começar o processo de entrada</span>
+          </div>
+        ) : (
+          notas.map((n) => (
           <button
             key={n.id}
             type="button"
@@ -201,7 +208,8 @@ export function EmEntrada({
             )}
             <span className="nx-em-fila-v mono">{fmtBRL(n.vlrProd)}</span>
           </button>
-        ))}
+        ))
+        )}
       </div>
 
       {selNota && (
