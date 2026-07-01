@@ -29,13 +29,13 @@ export async function getBlingCredentialsForOrg(
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const admin = createAdminClient() as any;
-    const { data } = await admin
+    const { data, error } = await admin
       .from("bling_app_credentials")
       .select("client_id, client_secret")
       .eq("org_id", orgId)
       .maybeSingle();
 
-    if (data?.client_id && data?.client_secret) {
+    if (!error && data?.client_id && data?.client_secret) {
       return {
         clientId: String(data.client_id),
         clientSecret: String(data.client_secret),
@@ -43,7 +43,7 @@ export async function getBlingCredentialsForOrg(
       };
     }
   } catch {
-    /* tabela ainda não migrada ou service role ausente */
+    /* service role ausente */
   }
 
   const env = getEnvBlingCredentials();

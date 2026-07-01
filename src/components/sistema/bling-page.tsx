@@ -234,17 +234,24 @@ export function BlingPageView({
     );
     if (!res.ok) return;
     const data = (await res.json()) as {
+      configured?: boolean;
       client_id: string;
       secret_set: boolean;
       redirect_uri: string;
     };
+    const isConfigured = !!data.configured || !!data.secret_set;
     setAppCred((c) => ({
       ...c,
       client_id: data.client_id ?? "",
-      secret_set: !!data.secret_set,
+      secret_set: isConfigured,
       redirect_uri: data.redirect_uri ?? "",
     }));
-    if (data.secret_set) setSecretEditing(false);
+    if (isConfigured) {
+      setSecretEditing(false);
+      setStatus((prev) =>
+        prev ? { ...prev, bling_configured: true } : prev,
+      );
+    }
   }, [activeOrg.orgId, demo]);
 
   useEffect(() => {
@@ -271,10 +278,11 @@ export function BlingPageView({
     .filter((e) => e.on)
     .reduce((s, e) => s + e.registros, 0);
 
+  const credentialsReady =
+    appCred.secret_set || !!status?.bling_configured;
+
   const serverReady =
-    !demo &&
-    !!status?.bling_configured &&
-    !!status?.service_role_configured;
+    !demo && credentialsReady && !!status?.service_role_configured;
 
   const toggleEnt = (id: string) => {
     setEnts((prev) => {
@@ -337,12 +345,33 @@ export function BlingPageView({
     }
   };
 
-  const reconnect = () => {
+  const reconnect = async () => {
     if (demo) {
       onSaved?.("Modo demo — use Integrações para simular conexão");
       return;
     }
-    if (!status?.bling_configured) {
+
+    let credsOk = appCred.secret_set || !!status?.bling_configured;
+    if (!credsOk) {
+      const res = await fetch(
+        `/api/bling/credentials?org_id=${encodeURIComponent(activeOrg.orgId)}`,
+      );
+      if (res.ok) {
+        const data = (await res.json()) as {
+          configured?: boolean;
+          secret_set?: boolean;
+        };
+        credsOk = !!data.configured || !!data.secret_set;
+        if (credsOk) {
+          setAppCred((c) => ({ ...c, secret_set: true }));
+          setStatus((prev) =>
+            prev ? { ...prev, bling_configured: true } : prev,
+          );
+        }
+      }
+    }
+
+    if (!credsOk) {
       toast.error(
         "Salve o Client ID e Client Secret na aba Credenciais antes de conectar.",
       );
@@ -405,6 +434,18 @@ export function BlingPageView({
       }));
       setSecretEditing(false);
       setShowSecret(false);
+      setStatus((prev) =>
+        prev
+          ? { ...prev, bling_configured: true }
+          : {
+              bling_configured: true,
+              service_role_configured: false,
+              conexoes: [],
+              logs: [],
+              totais: { produtos: 0, fornecedores: 0, estoque_linhas: 0 },
+              conectadas: 0,
+            },
+      );
       await loadStatus();
       toast.success("Credenciais salvas — agora clique em Conectar conta");
       onSaved?.("Credenciais Bling salvas");
@@ -525,7 +566,7 @@ export function BlingPageView({
         >
           <p className="type-caption" style={{ margin: 0, lineHeight: 1.5 }}>
             <strong>Como conectar:</strong>
-            {!status.bling_configured && (
+            {!credentialsReady && (
               <>
                 {" "}
                 1) Preencha <strong>Client ID</strong> e <strong>Client Secret</strong>{" "}
@@ -533,7 +574,7 @@ export function BlingPageView({
                 Cadastre a URL de callback no painel Bling.
               </>
             )}
-            {status.bling_configured && !status.service_role_configured && (
+            {credentialsReady && !status?.service_role_configured && (
               <>
                 {" "}
                 Credenciais salvas. Falta configurar{" "}
@@ -902,7 +943,7 @@ export function BlingPageView({
               developer.bling.com.br
             </a>
             . Cole aqui o Client ID e Secret do seu aplicativo.
-            {status?.bling_configured && (
+            {credentialsReady && (
               <>
                 {" "}
                 <span className="pill pill-ok" style={{ fontSize: 10 }}>

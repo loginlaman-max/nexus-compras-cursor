@@ -60,9 +60,26 @@ export async function GET(request: Request) {
     ).length ?? 0;
 
   const creds = await getBlingCredentialsForOrg(orgId, request);
+  let blingConfigured = creds !== null;
+
+  if (!blingConfigured) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { createAdminClient } = await import("@/lib/supabase/admin");
+      const admin = createAdminClient() as any;
+      const { data } = await admin
+        .from("bling_app_credentials")
+        .select("client_id")
+        .eq("org_id", orgId)
+        .maybeSingle();
+      blingConfigured = !!data?.client_id;
+    } catch {
+      /* ignore */
+    }
+  }
 
   return NextResponse.json({
-    bling_configured: creds !== null,
+    bling_configured: blingConfigured,
     service_role_configured: !!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
     redirect_uri: creds?.redirectUri ?? resolveBlingRedirectUri(request),
     conexoes: conexoes.data ?? [],
