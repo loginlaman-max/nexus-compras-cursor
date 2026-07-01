@@ -6,10 +6,9 @@ import { createClient } from "@supabase/supabase-js";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-const ADMIN_USER_ID = "2ee9d682-e13a-465c-9da2-8f8ab403b997";
-const ADMIN_EMAIL = "login.laman@gmail.com";
-const ORG_NOME = "Nexus Compras Distribuição LTDA";
-const ORG_CNPJ = "12.345.678/0001-90";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL?.trim() || "login.laman@gmail.com";
+const ORG_NOME = process.env.ORG_NOME?.trim() || "Nexus Compras Distribuição LTDA";
+const ORG_CNPJ = process.env.ORG_CNPJ?.trim() || "12.345.678/0001-90";
 
 function loadEnvLocal() {
   const path = resolve(process.cwd(), ".env.local");
@@ -72,12 +71,33 @@ if (existingOrgs?.length) {
   console.log("✅ Organização criada:", orgId);
 }
 
+// Localiza usuário pelo e-mail
+let adminUserId = null;
+const { data: listed, error: listErr } = await supabase.auth.admin.listUsers({
+  perPage: 1000,
+});
+if (listErr) {
+  console.error("❌ Erro ao listar usuários:", listErr.message);
+  process.exit(1);
+}
+const adminUser = listed?.users?.find(
+  (u) => u.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase(),
+);
+if (!adminUser) {
+  console.error(
+    `❌ Usuário ${ADMIN_EMAIL} não encontrado. Crie a conta em /login primeiro.`,
+  );
+  process.exit(1);
+}
+adminUserId = adminUser.id;
+console.log("✅ Usuário encontrado:", adminUserId);
+
 // Membro owner (super admin = papel owner no schema)
 const { data: existingMember } = await supabase
   .from("membros")
   .select("papel")
   .eq("org_id", orgId)
-  .eq("user_id", ADMIN_USER_ID)
+  .eq("user_id", adminUserId)
   .maybeSingle();
 
 if (existingMember) {
@@ -86,7 +106,7 @@ if (existingMember) {
       .from("membros")
       .update({ papel: "owner" })
       .eq("org_id", orgId)
-      .eq("user_id", ADMIN_USER_ID);
+      .eq("user_id", adminUserId);
     if (updErr) {
       console.error("❌ Erro ao promover para owner:", updErr.message);
       process.exit(1);
@@ -98,7 +118,7 @@ if (existingMember) {
 } else {
   const { error: memErr } = await supabase.from("membros").insert({
     org_id: orgId,
-    user_id: ADMIN_USER_ID,
+    user_id: adminUserId,
     papel: "owner",
   });
   if (memErr) {
@@ -109,7 +129,7 @@ if (existingMember) {
 }
 
 console.log("");
-console.log("Pronto! Acesse http://localhost:3000/org/selecionar");
+console.log("Pronto! Acesse /org/selecionar");
 console.log(`  E-mail: ${ADMIN_EMAIL}`);
-console.log(`  UID:    ${ADMIN_USER_ID}`);
+console.log(`  UID:    ${adminUserId}`);
 console.log(`  Papel:  owner (administrador máximo)`);

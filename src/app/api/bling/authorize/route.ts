@@ -3,6 +3,7 @@ import { BLING_AUTH_URL } from "@/lib/bling/config";
 import { getBlingCredentialsForOrg } from "@/lib/bling/org-credentials";
 import { blingConfigRedirect } from "@/lib/bling/redirect";
 import { encodeState } from "@/lib/bling/oauth";
+import { getOrgMember } from "@/lib/auth/membership";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET(request: Request) {
@@ -26,12 +27,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  const { data: membro } = await supabase
-    .from("membros")
-    .select("id")
-    .eq("org_id", orgId)
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const membro = await getOrgMember(supabase, orgId, user.id);
   if (!membro) {
     return blingConfigRedirect(request, "erro", "sem_permissao");
   }

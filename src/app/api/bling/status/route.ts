@@ -3,6 +3,7 @@ import {
   getBlingCredentialsForOrg,
   resolveBlingRedirectUri,
 } from "@/lib/bling/org-credentials";
+import { getOrgMember } from "@/lib/auth/membership";
 import { createClient } from "@/lib/supabase/server";
 import { isAdminClientConfigured } from "@/lib/supabase/admin";
 
@@ -20,12 +21,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "org_id obrigatório" }, { status: 400 });
   }
 
-  const { data: membro } = await supabase
-    .from("membros")
-    .select("id")
-    .eq("org_id", orgId)
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const membro = await getOrgMember(supabase, orgId, user.id);
   if (!membro) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }

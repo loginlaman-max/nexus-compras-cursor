@@ -1,87 +1,151 @@
 "use client";
 
 import {
-  Ban,
-  CheckCircle,
   MoreHorizontal,
-  PauseCircle,
   Search,
   SquarePen,
   Trash2,
   UserPlus,
   Users,
 } from "lucide-react";
-import { useState } from "react";
-import {
-  PERFIS_OPC,
-  USERS_SEED,
-  USER_STATUS,
-  type UsuarioConfig,
-} from "@/lib/configuracoes/config-data";
-import { nxStore } from "@/lib/store/nx-store";
-import { DField, DSelect, SetDialog, SetHeader } from "./config-shared";
+import { useCallback, useEffect, useState } from "react";
+import { useOrg } from "@/components/providers/org-provider";
+import { PAPEL_LABEL } from "@/lib/auth/constants";
+import { isDemoMode } from "@/lib/supabase/env";
+import type { Papel } from "@/lib/supabase/database.types";
+import { toast } from "sonner";
+import { DSelect, SetDialog, SetHeader } from "./config-shared";
 
-type EditUser = UsuarioConfig & { novo?: boolean };
+type MembroUi = {
+  user_id: string;
+  email: string;
+  nome: string;
+  papel: Papel;
+  perfil: string;
+  is_self: boolean;
+};
+
+const PAPEIS: Papel[] = ["owner", "admin", "comprador", "visualizador"];
 
 export function SetUsuarios({ onSaved }: { onSaved?: (msg: string) => void }) {
+  const { activeOrg } = useOrg();
+  const demo = isDemoMode();
   const [q, setQ] = useState("");
-  const [list, setList] = useState<UsuarioConfig[]>(() =>
-    nxStore.get("usuarios", USERS_SEED),
-  );
+  const [list, setList] = useState<MembroUi[]>([]);
+  const [canManage, setCanManage] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [menu, setMenu] = useState<string | null>(null);
-  const [edit, setEdit] = useState<EditUser | null>(null);
-  const [del, setDel] = useState<UsuarioConfig | null>(null);
+  const [edit, setEdit] = useState<MembroUi | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [invitePapel, setInvitePapel] = useState<Papel>("comprador");
+  const [del, setDel] = useState<MembroUi | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const persist = (next: UsuarioConfig[]) => {
-    setList(next);
-    nxStore.set("usuarios", next);
-  };
+  const load = useCallback(async () => {
+    if (demo) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `/api/membros?org_id=${encodeURIComponent(activeOrg.orgId)}`,
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Falha ao carregar usuários");
+      setList(data.membros ?? []);
+      setCanManage(!!data.can_manage);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao carregar");
+    } finally {
+      setLoading(false);
+    }
+  }, [activeOrg.orgId, demo]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const rows = list.filter(
     (u) =>
       !q ||
       u.nome.toLowerCase().includes(q.toLowerCase()) ||
-      u.email.includes(q),
+      u.email.toLowerCase().includes(q.toLowerCase()),
   );
 
-  const blank = (): EditUser => ({
-    id: "u" + Date.now(),
-    nome: "",
-    email: "",
-    cargo: "",
-    dep: "Compras",
-    filial: "Matriz PA",
-    perfil: "Comprador",
-    status: "ativo",
-    novo: true,
-  });
-
-  const saveEdit = () => {
-    if (!edit) return;
-    const exists = list.some((u) => u.id === edit.id);
-    const { novo, ...user } = edit;
-    persist(
-      exists
-        ? list.map((u) => (u.id === edit.id ? user : u))
-        : [...list, { ...user, status: novo ? "inativo" : user.status }],
-    );
-    onSaved?.(
-      exists ? "Usuário atualizado" : "Convite enviado para " + edit.email,
-    );
-    setEdit(null);
+  const saveEdit = async () => {
+    if (!edit || demo) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/membros", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          org_id: activeOrg.orgId,
+          user_id: edit.user_id,
+          papel: edit.papel,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Falha ao salvar");
+      await load();
+      onSaved?.("Perfil atualizado");
+      toast.success("Perfil atualizado");
+      setEdit(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao salvar");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const setStatus = (u: UsuarioConfig, status: UsuarioConfig["status"]) => {
-    persist(list.map((x) => (x.id === u.id ? { ...x, status } : x)));
-    setMenu(null);
-    onSaved?.("Status alterado para " + USER_STATUS[status].l);
+  const sendInvite = async () => {
+    if (demo || !inviteEmail.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/membros", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          org_id: activeOrg.orgId,
+          email: inviteEmail.trim(),
+          papel: invitePapel,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Falha ao convidar");
+      await load();
+      toast.success(data.message ?? "Convite enviado");
+      onSaved?.(data.message ?? "Convite enviado");
+      setInviteOpen(false);
+      setInviteEmail("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao convidar");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const doDelete = () => {
-    if (!del) return;
-    persist(list.filter((u) => u.id !== del.id));
-    onSaved?.("Usuário removido");
-    setDel(null);
+  const doDelete = async () => {
+    if (!del || demo) return;
+    setSaving(true);
+    try {
+      const res = await fetch(
+        `/api/membros?org_id=${encodeURIComponent(activeOrg.orgId)}&user_id=${encodeURIComponent(del.user_id)}`,
+        { method: "DELETE" },
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Falha ao remover");
+      await load();
+      onSaved?.("Usuário removido");
+      toast.success("Usuário removido");
+      setDel(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao remover");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -89,7 +153,11 @@ export function SetUsuarios({ onSaved }: { onSaved?: (msg: string) => void }) {
       <SetHeader
         icon={Users}
         title="Usuários"
-        sub={`${list.length} usuários · ${list.filter((u) => u.status === "ativo").length} ativos`}
+        sub={
+          loading
+            ? "Carregando…"
+            : `${list.length} usuários na organização ${activeOrg.org.nome}`
+        }
       />
       <div className="card">
         <div className="nx-cc-toolbar">
@@ -102,183 +170,179 @@ export function SetUsuarios({ onSaved }: { onSaved?: (msg: string) => void }) {
             />
           </label>
           <div style={{ flex: 1 }} />
-          <button
-            type="button"
-            className="btn btn-primary-blue"
-            onClick={() => setEdit(blank())}
-          >
-            <UserPlus size={13} /> CONVIDAR USUÁRIO
-          </button>
+          {canManage && (
+            <button
+              type="button"
+              className="btn btn-primary-blue"
+              onClick={() => setInviteOpen(true)}
+              disabled={demo}
+            >
+              <UserPlus size={13} /> CONVIDAR USUÁRIO
+            </button>
+          )}
         </div>
         <table className="tbl tbl-cc">
           <thead>
             <tr>
               <th>Usuário</th>
-              <th>Cargo</th>
-              <th>Departamento</th>
-              <th>Filial</th>
+              <th>E-mail</th>
               <th>Perfil</th>
-              <th style={{ width: 110 }}>Status</th>
               <th style={{ width: 90, textAlign: "right" }}>Ações</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((u) => {
-              const st = USER_STATUS[u.status];
-              return (
-                <tr key={u.id}>
-                  <td>
-                    <div className="nx-set-user">
-                      <div className="nx-set-avatar">
-                        {u.nome
-                          .split(" ")
-                          .map((w) => w[0])
-                          .slice(0, 2)
-                          .join("") || "?"}
-                      </div>
-                      <div>
-                        <div
-                          style={{
-                            fontWeight: 600,
-                            color: "hsl(var(--foreground))",
-                          }}
-                        >
-                          {u.nome || "(sem nome)"}
-                        </div>
-                        <div style={{ fontSize: 11 }}>{u.email}</div>
-                      </div>
+            {loading && (
+              <tr>
+                <td colSpan={4} style={{ textAlign: "center", padding: 24 }}>
+                  Carregando usuários…
+                </td>
+              </tr>
+            )}
+            {!loading && rows.length === 0 && (
+              <tr>
+                <td colSpan={4} style={{ textAlign: "center", padding: 24 }}>
+                  Nenhum usuário encontrado.
+                </td>
+              </tr>
+            )}
+            {rows.map((u) => (
+              <tr key={u.user_id}>
+                <td>
+                  <div className="nx-set-user">
+                    <div className="nx-set-avatar">
+                      {u.nome
+                        .split(" ")
+                        .map((w) => w[0])
+                        .slice(0, 2)
+                        .join("") || "?"}
                     </div>
-                  </td>
-                  <td>{u.cargo}</td>
-                  <td>{u.dep}</td>
-                  <td>{u.filial}</td>
-                  <td>
-                    <span className="nx-set-perfilchip">{u.perfil}</span>
-                  </td>
-                  <td>
-                    <span className={`pill pill-${st.c}`}>{st.l}</span>
-                  </td>
-                  <td style={{ textAlign: "right", position: "relative" }}>
-                    <button
-                      type="button"
-                      className="nx-rowbtn"
-                      onClick={() => setMenu(menu === u.id ? null : u.id)}
-                    >
-                      <MoreHorizontal size={13} />
-                    </button>
-                    {menu === u.id && (
-                      <div
-                        className="nx-set-menu"
-                        onMouseLeave={() => setMenu(null)}
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{u.nome}</div>
+                      {u.is_self && (
+                        <div style={{ fontSize: 10, opacity: 0.7 }}>você</div>
+                      )}
+                    </div>
+                  </div>
+                </td>
+                <td style={{ fontSize: 12 }}>{u.email}</td>
+                <td>
+                  <span className="nx-set-perfilchip">{u.perfil}</span>
+                </td>
+                <td style={{ textAlign: "right", position: "relative" }}>
+                  {canManage && !u.is_self && (
+                    <>
+                      <button
+                        type="button"
+                        className="nx-rowbtn"
+                        onClick={() =>
+                          setMenu(menu === u.user_id ? null : u.user_id)
+                        }
                       >
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEdit({ ...u });
-                            setMenu(null);
-                          }}
+                        <MoreHorizontal size={13} />
+                      </button>
+                      {menu === u.user_id && (
+                        <div
+                          className="nx-set-menu"
+                          onMouseLeave={() => setMenu(null)}
                         >
-                          <SquarePen size={13} /> Editar
-                        </button>
-                        {u.status !== "ativo" && (
                           <button
                             type="button"
-                            onClick={() => setStatus(u, "ativo")}
+                            onClick={() => {
+                              setEdit({ ...u });
+                              setMenu(null);
+                            }}
                           >
-                            <CheckCircle size={13} /> Ativar
+                            <SquarePen size={13} /> Alterar perfil
                           </button>
-                        )}
-                        {u.status === "ativo" && (
                           <button
                             type="button"
-                            onClick={() => setStatus(u, "suspenso")}
+                            className="danger"
+                            onClick={() => {
+                              setDel(u);
+                              setMenu(null);
+                            }}
                           >
-                            <PauseCircle size={13} /> Suspender
+                            <Trash2 size={13} /> Remover
                           </button>
-                        )}
-                        {u.status !== "bloqueado" && (
-                          <button
-                            type="button"
-                            onClick={() => setStatus(u, "bloqueado")}
-                          >
-                            <Ban size={13} /> Bloquear
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="danger"
-                          onClick={() => {
-                            setDel(u);
-                            setMenu(null);
-                          }}
-                        >
-                          <Trash2 size={13} /> Remover
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
 
       {edit && (
         <SetDialog
-          title={edit.novo ? "Convidar Usuário" : "Editar Usuário"}
+          title="Alterar perfil"
           onClose={() => setEdit(null)}
-          onSave={saveEdit}
-          saveLabel={edit.novo ? "Enviar convite" : "Salvar"}
+          onSave={() => void saveEdit()}
+          saveLabel="Salvar"
+          saveDisabled={saving}
+        >
+          <p style={{ margin: "0 0 12px", fontSize: 13 }}>{edit.email}</p>
+          <DSelect
+            label="Perfil de acesso"
+            value={edit.papel}
+            options={PAPEIS.map((p) => PAPEL_LABEL[p] ?? p)}
+            onChange={(label) => {
+              const papel =
+                PAPEIS.find((p) => (PAPEL_LABEL[p] ?? p) === label) ??
+                edit.papel;
+              setEdit((e) => (e ? { ...e, papel, perfil: label } : e));
+            }}
+          />
+        </SetDialog>
+      )}
+
+      {inviteOpen && (
+        <SetDialog
+          title="Convidar usuário"
+          onClose={() => setInviteOpen(false)}
+          onSave={() => void sendInvite()}
+          saveLabel="Enviar convite"
+          saveDisabled={saving || !inviteEmail.trim()}
         >
           <div className="nx-cob-grid2">
-            <DField
-              label="Nome"
-              value={edit.nome}
-              onChange={(v) => setEdit((e) => (e ? { ...e, nome: v } : e))}
-            />
-            <DField
-              label="E-mail"
-              value={edit.email}
-              onChange={(v) => setEdit((e) => (e ? { ...e, email: v } : e))}
-            />
-            <DField
-              label="Cargo"
-              value={edit.cargo}
-              onChange={(v) => setEdit((e) => (e ? { ...e, cargo: v } : e))}
-            />
+            <label className="nx-set-field">
+              <span>E-mail</span>
+              <input
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="nome@empresa.com.br"
+              />
+            </label>
             <DSelect
-              label="Departamento"
-              value={edit.dep}
-              options={["Compras", "Diretoria", "Financeiro", "TI", "Estoque"]}
-              onChange={(v) => setEdit((e) => (e ? { ...e, dep: v } : e))}
-            />
-            <DSelect
-              label="Filial"
-              value={edit.filial}
-              options={["Matriz PA", "Senador Lemos", "Filial SC", "Filial SP"]}
-              onChange={(v) => setEdit((e) => (e ? { ...e, filial: v } : e))}
-            />
-            <DSelect
-              label="Perfil de Acesso"
-              value={edit.perfil}
-              options={PERFIS_OPC}
-              onChange={(v) => setEdit((e) => (e ? { ...e, perfil: v } : e))}
+              label="Perfil"
+              value={PAPEL_LABEL[invitePapel] ?? invitePapel}
+              options={PAPEIS.filter((p) => p !== "owner").map(
+                (p) => PAPEL_LABEL[p] ?? p,
+              )}
+              onChange={(label) => {
+                const papel =
+                  PAPEIS.find((p) => (PAPEL_LABEL[p] ?? p) === label) ??
+                  "comprador";
+                setInvitePapel(papel);
+              }}
             />
           </div>
         </SetDialog>
       )}
+
       {del && (
         <SetDialog
-          title="Remover Usuário"
+          title="Remover usuário"
           onClose={() => setDel(null)}
-          onSave={doDelete}
+          onSave={() => void doDelete()}
           saveLabel="Remover"
+          saveDisabled={saving}
           danger
         >
           <p style={{ margin: 0, fontSize: 13 }}>
-            Remover <strong>{del.nome || del.email}</strong> do tenant? O acesso
-            será revogado imediatamente.
+            Remover <strong>{del.nome || del.email}</strong> desta organização?
           </p>
         </SetDialog>
       )}
