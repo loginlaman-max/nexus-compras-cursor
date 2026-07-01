@@ -22,6 +22,7 @@ import {
 import { useCatalog } from "@/components/providers/catalog-provider";
 import { useOrg } from "@/components/providers/org-provider";
 import { SetDialog } from "@/components/sistema/configuracoes/config-shared";
+import { useShell } from "@/components/providers/shell-provider";
 import { useFiliaisIntegracao } from "@/hooks/use-filiais-integracao";
 import {
   BLING_RATE_LIMIT_RPS,
@@ -37,6 +38,10 @@ import {
   type WhAcoes,
 } from "@/lib/bling/page-data";
 import { filterSyncEntidades } from "@/lib/bling/api-client";
+import {
+  notifyCatalogSyncDone,
+  triggerBlingSync,
+} from "@/lib/bling/sync-client";
 import { nxStore } from "@/lib/store/nx-store";
 import { isDemoMode } from "@/lib/supabase/env";
 import { toast } from "sonner";
@@ -116,6 +121,7 @@ export function BlingPageView({
 } = {}) {
   const { activeOrg } = useOrg();
   const { refresh: refreshCatalog } = useCatalog();
+  const { setFilial } = useShell();
   const { filiais, loading: filiaisLoading } = useFiliaisIntegracao();
   const demo = isDemoMode();
 
@@ -309,25 +315,23 @@ export function BlingPageView({
         primeira?.filial_id ??
         status?.conexoes?.find((c) => c.status === "conectado")?.filial_id;
 
-      const res = await fetch("/api/bling/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          org_id: activeOrg.orgId,
-          filial_id: filialId,
-          entidades,
-        }),
+      const result = await triggerBlingSync(activeOrg.orgId, {
+        filialId,
+        entidades,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Falha na sync");
+      if (!result.ok) throw new Error(result.error ?? "Falha na sync");
+
+      if (filialId) setFilial(filialId);
       await loadStatus();
       await refreshCatalog();
-      if (data.partial) {
-        toast.warning(data.message ?? "Sincronização parcial");
-        onSaved?.(data.message ?? "Sincronização parcial");
+      notifyCatalogSyncDone();
+
+      if (result.partial) {
+        toast.warning(result.message);
+        onSaved?.(result.message);
       } else {
-        toast.success("Sincronização concluída");
-        onSaved?.("Sincronização concluída");
+        toast.success(result.message);
+        onSaved?.(result.message);
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erro na sincronização");

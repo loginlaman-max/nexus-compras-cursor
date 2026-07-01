@@ -1,7 +1,7 @@
 import { decodeState, exchangeCode } from "@/lib/bling/oauth";
 import { getBlingCredentialsForOrg } from "@/lib/bling/org-credentials";
 import { blingConfigRedirect } from "@/lib/bling/redirect";
-import { createAdminClient, getServiceRoleKey } from "@/lib/supabase/admin";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -53,6 +53,7 @@ export async function GET(request: Request) {
         org_id: state.org_id,
         id: state.filial_id,
         nome: state.filial_id,
+        is_cd: state.filial_id === "matriz",
       });
     }
 
@@ -70,23 +71,10 @@ export async function GET(request: Request) {
       { onConflict: "org_id,filial_id" },
     );
 
-    const fnUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/bling-sync`;
-    const serviceKey = getServiceRoleKey();
-    if (fnUrl && serviceKey) {
-      fetch(fnUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${serviceKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          org_id: state.org_id,
-          filial_id: state.filial_id,
-        }),
-      }).catch(() => {});
-    }
-
-    return blingConfigRedirect(request, "ok");
+    return blingConfigRedirect(request, "ok", undefined, {
+      filialId: state.filial_id,
+      autoSync: true,
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "erro_token";
     return blingConfigRedirect(request, "erro", msg.slice(0, 120));

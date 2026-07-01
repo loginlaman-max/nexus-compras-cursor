@@ -58,6 +58,15 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (demo) return;
+    const handler = () => {
+      void refresh();
+    };
+    window.addEventListener("nx-bling-sync-done", handler);
+    return () => window.removeEventListener("nx-bling-sync-done", handler);
+  }, [demo, refresh]);
+
+  useEffect(() => {
+    if (demo) return;
     void refresh();
   }, [demo, refresh]);
 

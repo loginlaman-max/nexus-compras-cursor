@@ -5,6 +5,11 @@ import { RefreshCw } from "lucide-react";
 import { RelBanner } from "@/components/rel/rel-banner";
 import { useCatalog } from "@/components/providers/catalog-provider";
 import { useOrg } from "@/components/providers/org-provider";
+import { INITIAL_SYNC_ENTITIES } from "@/lib/bling/sync-summary";
+import {
+  notifyCatalogSyncDone,
+  triggerBlingSync,
+} from "@/lib/bling/sync-client";
 import { isDemoMode } from "@/lib/supabase/env";
 import { toast } from "sonner";
 
@@ -47,16 +52,15 @@ export function SyncPageView() {
     }
     setSyncing(true);
     try {
-      const res = await fetch("/api/bling/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ org_id: activeOrg.orgId }),
+      const result = await triggerBlingSync(activeOrg.orgId, {
+        entidades: [...INITIAL_SYNC_ENTITIES],
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Falha");
+      if (!result.ok) throw new Error(result.error ?? "Falha");
       await load();
       await refreshCatalog();
-      toast.success("Sincronização executada");
+      notifyCatalogSyncDone();
+      if (result.partial) toast.warning(result.message);
+      else toast.success(result.message);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erro");
     } finally {

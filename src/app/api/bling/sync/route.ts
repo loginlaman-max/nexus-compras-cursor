@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getOrgMember } from "@/lib/auth/membership";
 import { filterSyncEntidades } from "@/lib/bling/api-client";
 import { runBlingSync } from "@/lib/bling/sync-runner";
+import { buildSyncSummaryMessage } from "@/lib/bling/sync-summary";
 import { createClient } from "@/lib/supabase/server";
 
 /** Sync Bling pode levar dezenas de segundos em catálogos grandes. */
@@ -62,10 +63,9 @@ export async function POST(request: Request) {
       ok: true,
       partial: outcome.partial,
       results: outcome.results,
+      summary: outcome.summary,
       errors: outcome.errors.length ? outcome.errors : undefined,
-      message: outcome.partial
-        ? `Sync parcial: ${outcome.errors.join("; ")}`
-        : "Sincronização concluída",
+      message: buildSyncSummaryMessage(outcome.summary, outcome.partial),
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Falha na sincronização";

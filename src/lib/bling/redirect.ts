@@ -4,11 +4,14 @@ export function blingConfigRedirect(
   request: Request,
   bling: "ok" | "erro",
   msg?: string,
+  extra?: { filialId?: string; autoSync?: boolean },
 ) {
   const base = new URL("/configuracoes", request.url);
   base.searchParams.set("tab", "integracoes");
   base.searchParams.set("bling", bling);
   if (msg) base.searchParams.set("msg", msg);
+  if (extra?.filialId) base.searchParams.set("filial_id", extra.filialId);
+  if (extra?.autoSync) base.searchParams.set("auto_sync", "1");
   return NextResponse.redirect(base);
 }
 

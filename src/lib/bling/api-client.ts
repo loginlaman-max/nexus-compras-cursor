@@ -1,6 +1,14 @@
 import { BLING_API_URL, BLING_TOKEN_URL } from "./config";
 import { getBlingCredentialsForOrg } from "./org-credentials";
+import {
+  orderSyncEntidades,
+  SYNC_ENTITY_ORDER,
+  type SyncEntityId,
+} from "./sync-summary";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+export type { SyncEntityId };
+export const SUPPORTED_SYNC_ENTITIES = SYNC_ENTITY_ORDER;
 
 export type BlingConn = {
   org_id: string;
@@ -116,18 +124,11 @@ export async function fetchAllPages<T>(
   return all;
 }
 
-export const SUPPORTED_SYNC_ENTITIES = [
-  "contatos",
-  "produtos",
-  "estoque",
-  "vendas",
-] as const;
-
-export type SyncEntityId = (typeof SUPPORTED_SYNC_ENTITIES)[number];
-
 export function filterSyncEntidades(ids?: string[]): SyncEntityId[] {
-  if (!ids?.length) return [...SUPPORTED_SYNC_ENTITIES];
-  return ids.filter((id): id is SyncEntityId =>
-    (SUPPORTED_SYNC_ENTITIES as readonly string[]).includes(id),
-  );
+  const picked: SyncEntityId[] = !ids?.length
+    ? [...SUPPORTED_SYNC_ENTITIES]
+    : ids.filter((id): id is SyncEntityId =>
+        (SUPPORTED_SYNC_ENTITIES as readonly string[]).includes(id),
+      );
+  return orderSyncEntidades(picked);
 }

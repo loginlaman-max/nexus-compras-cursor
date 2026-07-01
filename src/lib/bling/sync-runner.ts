@@ -6,6 +6,7 @@ import {
   type BlingConn,
   type SyncEntityId,
 } from "./api-client";
+import { sumImported, type SyncSummary } from "./sync-summary";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type BlingProduto = {
@@ -345,6 +346,32 @@ async function syncFilial(
   return { results, errors };
 }
 
+async function getCatalogTotals(
+  admin: Admin,
+  orgId: string,
+): Promise<SyncSummary["totals"]> {
+  const [prodCount, fornCount, estCount] = await Promise.all([
+    admin
+      .from("produtos")
+      .select("*", { count: "exact", head: true })
+      .eq("org_id", orgId),
+    admin
+      .from("fornecedores")
+      .select("*", { count: "exact", head: true })
+      .eq("org_id", orgId),
+    admin
+      .from("estoque_saldos")
+      .select("*", { count: "exact", head: true })
+      .eq("org_id", orgId),
+  ]);
+
+  return {
+    produtos: prodCount.count ?? 0,
+    fornecedores: fornCount.count ?? 0,
+    estoque_linhas: estCount.count ?? 0,
+  };
+}
+
 export async function runBlingSync(
   orgId: string,
   options?: { filialId?: string | null; entidades?: string[] },
@@ -386,10 +413,15 @@ export async function runBlingSync(
     allErrors.push(...errors);
   }
 
+  const totals = await getCatalogTotals(admin, orgId);
+  const imported = sumImported(allResults);
+  const summary: SyncSummary = { imported, totals };
+
   return {
     ok: allErrors.length === 0,
     partial: allErrors.length > 0 && Object.keys(allResults).length > 0,
     results: allResults,
     errors: allErrors,
+    summary,
   };
 }

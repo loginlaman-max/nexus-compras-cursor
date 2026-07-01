@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -21,8 +21,12 @@ import {
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useCatalog } from "@/components/providers/catalog-provider";
+import { useOrg } from "@/components/providers/org-provider";
+import { useShell } from "@/components/providers/shell-provider";
 import { useSaveToast } from "@/hooks/use-save-toast";
 import { BLING_CALLBACK_MESSAGES } from "@/lib/bling/redirect";
+import { runInitialBlingSync } from "@/lib/bling/sync-client";
 import { BlingPageView } from "@/components/sistema/bling-page";
 import {
   SetCondComerciais,
@@ -103,31 +107,62 @@ export function ConfiguracoesPageView() {
   const onSaved = toast.show;
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { activeOrg } = useOrg();
+  const { refresh: refreshCatalog } = useCatalog();
+  const { setFilial } = useShell();
+  const oauthHandled = useRef(false);
 
   useEffect(() => {
     const tab = searchParams.get("tab");
     const bling = searchParams.get("bling");
     if (!tab && !bling) return;
+    if (oauthHandled.current && !bling) return;
 
     if (tab === "integracoes" || bling) {
       setSec("integracoes");
-      setManage(null);
     }
 
     if (!bling) return;
+    oauthHandled.current = true;
 
     const msgKey = searchParams.get("msg");
+    const filialId = searchParams.get("filial_id");
+    const autoSync = searchParams.get("auto_sync") === "1";
+
+    router.replace("/configuracoes?tab=integracoes");
+
     if (bling === "ok") {
-      onSaved("Conta Bling conectada com sucesso!");
+      if (filialId) setFilial(filialId);
+
+      if (autoSync && filialId) {
+        setManage("bling");
+        onSaved("Conta Bling conectada — importando catálogo…");
+        void (async () => {
+          const result = await runInitialBlingSync(activeOrg.orgId, filialId);
+          await refreshCatalog();
+          if (result.ok) {
+            onSaved(result.message);
+          } else {
+            onSaved(result.message);
+          }
+        })();
+      } else {
+        onSaved("Conta Bling conectada com sucesso!");
+      }
     } else if (bling === "erro") {
       onSaved(
         (msgKey && BLING_CALLBACK_MESSAGES[msgKey]) ||
           `Erro na integração Bling${msgKey ? `: ${msgKey}` : ""}`,
       );
     }
-
-    router.replace("/configuracoes");
-  }, [searchParams, router, onSaved]);
+  }, [
+    searchParams,
+    router,
+    onSaved,
+    activeOrg.orgId,
+    refreshCatalog,
+    setFilial,
+  ]);
 
   const allItems = SET_NAV.flatMap((g) => g.items);
   const cur = allItems.find((i) => i.id === sec);
