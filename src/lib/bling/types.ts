@@ -8,9 +8,13 @@ export type BlingProduto = {
   ncm?: string;
   unidade?: string;
   situacao?: string;
-  marca?: string;
-  linhaProduto?: { id?: number; descricao?: string };
-  categoria?: { id?: number; descricao?: string; nome?: string };
+  marca?: string | { descricao?: string; nome?: string };
+  linhaProduto?: { id?: number; descricao?: string; nome?: string };
+  categoria?: {
+    id?: number;
+    descricao?: string;
+    nome?: string;
+  };
   imagemURL?: string;
   midia?: {
     imagens?: { link?: string; url?: string; linkMiniatura?: string }[];

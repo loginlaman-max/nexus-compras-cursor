@@ -22,6 +22,7 @@ export async function POST(request: Request) {
     filial_id?: string;
     entidades?: string[];
     incremental?: boolean;
+    full_product?: boolean;
   };
   const orgId = body.org_id;
   if (!orgId) {
@@ -50,6 +51,7 @@ export async function POST(request: Request) {
       entidades: body.entidades,
       incremental: body.incremental ?? false,
       trigger: "manual",
+      fullProduct: body.full_product,
     });
 
     if (!outcome.ok && !outcome.partial) {

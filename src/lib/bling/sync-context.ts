@@ -10,6 +10,10 @@ export type SyncRunOptions = {
   enrichLimit?: number;
   /** Pula enrichment de fornecedor do produto (cron/incremental). */
   skipEnrichment?: boolean;
+  /** Busca GET /produtos/{id} para marca, categoria, unidade e imagem. */
+  fullProduct?: boolean;
+  /** Pula detalhe do produto (cron/incremental ou sync rápido). */
+  skipDetalhe?: boolean;
 };
 
 export type SyncContext = {

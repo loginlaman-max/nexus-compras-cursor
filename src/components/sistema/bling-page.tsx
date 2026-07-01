@@ -39,9 +39,13 @@ import {
 } from "@/lib/bling/page-data";
 import { filterSyncEntidades } from "@/lib/bling/api-client";
 import {
+  ENTITY_SYNC_LABELS,
   notifyCatalogSyncDone,
   triggerBlingSync,
+  triggerEntitySync,
 } from "@/lib/bling/sync-client";
+import type { SyncEntityId } from "@/lib/bling/sync-summary";
+import { SYNC_ENTITY_ORDER } from "@/lib/bling/sync-summary";
 import { nxStore } from "@/lib/store/nx-store";
 import { isDemoMode } from "@/lib/supabase/env";
 import { toast } from "sonner";
@@ -104,6 +108,15 @@ function formatTokenRenewal(iso: string | null): string {
   return `renova em ${h}h`;
 }
 
+function entityFromLogFn(fn: string): SyncEntityId | null {
+  const match = fn.match(/bling-sync-(?:chunk-)?(\w+)/);
+  const id = match?.[1];
+  if (!id) return null;
+  return (SYNC_ENTITY_ORDER as readonly string[]).includes(id)
+    ? (id as SyncEntityId)
+    : null;
+}
+
 function copyText(text: string, onSaved?: (msg: string) => void) {
   void navigator.clipboard?.writeText(text);
   onSaved?.("URL copiada");
@@ -128,6 +141,7 @@ export function BlingPageView({
   const [tab, setTab] = useState<TabId>("visao");
   const [status, setStatus] = useState<BlingStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [syncingEntity, setSyncingEntity] = useState<string | null>(null);
   const [savingCred, setSavingCred] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
   const [secretEditing, setSecretEditing] = useState(false);
@@ -299,6 +313,72 @@ export function BlingPageView({
     });
   };
 
+  const resolveFilialId = () =>
+    primeira?.filial_id ??
+    status?.conexoes?.find((c) => c.status === "conectado")?.filial_id;
+
+  const finishSync = async (
+    result: {
+      ok: boolean;
+      partial?: boolean;
+      message: string;
+      error?: string;
+    },
+    filialId?: string,
+  ) => {
+    if (!result.ok) throw new Error(result.error ?? "Falha na sync");
+    if (filialId) setFilial(filialId);
+    await loadStatus();
+    await refreshCatalog();
+    notifyCatalogSyncDone();
+    if (result.partial) {
+      toast.warning(result.message);
+      onSaved?.(result.message);
+    } else {
+      toast.success(result.message);
+      onSaved?.(result.message);
+    }
+  };
+
+  const runEntitySync = async (entityId: string) => {
+    if (demo) {
+      onSaved?.("Modo demo — configure Supabase e Bling");
+      return;
+    }
+    const label = ENTITY_SYNC_LABELS[entityId as SyncEntityId] ?? entityId;
+    setSyncingEntity(entityId);
+    const toastId = `sync-${entityId}`;
+    toast.loading(
+      entityId === "produtos"
+        ? "Sincronizando produtos (marca, categoria, custo, imagem)…"
+        : `Sincronizando ${label}…`,
+      { id: toastId },
+    );
+    try {
+      const filialId = resolveFilialId();
+      const result = await triggerEntitySync(
+        activeOrg.orgId,
+        entityId as SyncEntityId,
+        {
+          filialId,
+          onProgress: (ent, pag) => {
+            toast.loading(
+              `${ENTITY_SYNC_LABELS[ent] ?? ent} — página ${pag}`,
+              { id: toastId },
+            );
+          },
+        },
+      );
+      toast.dismiss(toastId);
+      await finishSync(result, filialId);
+    } catch (e) {
+      toast.dismiss(toastId);
+      toast.error(e instanceof Error ? e.message : "Erro na sincronização");
+    } finally {
+      setSyncingEntity(null);
+    }
+  };
+
   const runSync = async () => {
     if (demo) {
       onSaved?.("Modo demo — configure Supabase e Bling");
@@ -315,28 +395,14 @@ export function BlingPageView({
         );
         return;
       }
-      const filialId =
-        primeira?.filial_id ??
-        status?.conexoes?.find((c) => c.status === "conectado")?.filial_id;
+      const filialId = resolveFilialId();
 
       const result = await triggerBlingSync(activeOrg.orgId, {
         filialId,
         entidades,
+        fullProduct: true,
       });
-      if (!result.ok) throw new Error(result.error ?? "Falha na sync");
-
-      if (filialId) setFilial(filialId);
-      await loadStatus();
-      await refreshCatalog();
-      notifyCatalogSyncDone();
-
-      if (result.partial) {
-        toast.warning(result.message);
-        onSaved?.(result.message);
-      } else {
-        toast.success(result.message);
-        onSaved?.(result.message);
-      }
+      await finishSync(result, filialId);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erro na sincronização");
     } finally {
@@ -720,6 +786,7 @@ export function BlingPageView({
                     </th>
                     <th style={{ width: 90 }}>Última</th>
                     <th style={{ width: 90 }}>Status</th>
+                    <th style={{ width: 52, textAlign: "right" }}>Sync</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -728,6 +795,7 @@ export function BlingPageView({
                     .map((e) => {
                       const st = STATUS_MAP[e.status];
                       const Icon = e.icon;
+                      const rowSyncing = syncingEntity === e.id;
                       return (
                         <tr key={e.id}>
                           <td>
@@ -747,6 +815,19 @@ export function BlingPageView({
                           </td>
                           <td>
                             <span className={`pill pill-${st.c}`}>{st.l}</span>
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            <button
+                              type="button"
+                              className="nx-rowbtn"
+                              title={`Sincronizar ${e.label}`}
+                              disabled={syncing || rowSyncing}
+                              onClick={() => void runEntitySync(e.id)}
+                            >
+                              <RefreshCw
+                                className={`size-3${rowSyncing ? " animate-spin" : ""}`}
+                              />
+                            </button>
                           </td>
                         </tr>
                       );
@@ -844,6 +925,19 @@ export function BlingPageView({
               </h2>
               <span className="type-caption">Por entidade · De/Para</span>
             </div>
+            <p
+              className="type-caption"
+              style={{
+                margin: 0,
+                padding: "0 16px 12px",
+                lineHeight: 1.5,
+                color: "hsl(var(--muted-foreground))",
+              }}
+            >
+              Use o botão ↻ em cada linha para sincronizar só aquela entidade.
+              Em <strong>Produtos</strong>, o sync busca detalhe no Bling
+              (marca, categoria, unidade, custo, imagem e código do fornecedor).
+            </p>
             <table className="tbl tbl-cc">
               <thead>
                 <tr>
@@ -855,12 +949,14 @@ export function BlingPageView({
                   </th>
                   <th style={{ width: 90 }}>Última</th>
                   <th style={{ width: 90 }}>Status</th>
+                  <th style={{ width: 52, textAlign: "right" }}>Ação</th>
                 </tr>
               </thead>
               <tbody>
                 {displayEnts.map((e) => {
                   const st = STATUS_MAP[e.status];
                   const Icon = e.icon;
+                  const rowSyncing = syncingEntity === e.id;
                   return (
                     <tr key={e.id}>
                       <td>
@@ -892,6 +988,19 @@ export function BlingPageView({
                       </td>
                       <td>
                         <span className={`pill pill-${st.c}`}>{st.l}</span>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <button
+                          type="button"
+                          className="nx-rowbtn"
+                          title={`Sincronizar ${e.label}`}
+                          disabled={syncing || rowSyncing}
+                          onClick={() => void runEntitySync(e.id)}
+                        >
+                          <RefreshCw
+                            className={`size-3${rowSyncing ? " animate-spin" : ""}`}
+                          />
+                        </button>
                       </td>
                     </tr>
                   );
@@ -962,12 +1071,16 @@ export function BlingPageView({
                         {l.msg}
                       </td>
                       <td style={{ textAlign: "right" }}>
-                        {l.status !== "sucesso" && (
+                        {l.status !== "sucesso" && entityFromLogFn(l.fn) && (
                           <button
                             type="button"
                             className="nx-rowbtn"
                             title="Reprocessar"
-                            onClick={() => void runSync()}
+                            disabled={syncing || !!syncingEntity}
+                            onClick={() => {
+                              const ent = entityFromLogFn(l.fn);
+                              if (ent) void runEntitySync(ent);
+                            }}
                           >
                             <RefreshCw className="size-3" />
                           </button>

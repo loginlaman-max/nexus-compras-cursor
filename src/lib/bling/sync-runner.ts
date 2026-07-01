@@ -18,7 +18,9 @@ import {
 } from "./contato-map";
 import { isNfeEntrada } from "./nfe-helpers";
 import {
+  mergeProdutoDetalhe,
   needsProdutoEnrichment,
+  produtoNeedsDetalhe,
   resolveCategoria,
   resolveCodForn,
   resolveImagemUrl,
@@ -59,12 +61,19 @@ type BlingPedidoVenda = {
 };
 
 const ENRICH_DELAY_MS = 500;
+const DETALHE_DELAY_MS = 350;
 const DEFAULT_ENRICH_LIMIT = 50;
+/** Página menor quando busca detalhe + fornecedor por produto. */
+const FULL_PRODUCT_PAGE_SIZE = 25;
+const FULL_PRODUCT_ENRICH_LIMIT = 25;
 
 type ProdutoSyncOpts = {
   skipEnrichment?: boolean;
+  skipDetalhe?: boolean;
   enrichLimit?: number;
+  detalheLimit?: number;
   enrichCount?: { n: number };
+  detalheCount?: { n: number };
 };
 
 type EntityPageResult = {
@@ -139,6 +148,23 @@ async function enrichProdutoFornecedor(
     return json.data?.find((r) => r.padrao) ?? json.data?.[0] ?? null;
   } catch {
     return null;
+  }
+}
+
+async function enrichProdutoDetalhe(
+  token: string,
+  p: BlingProduto,
+): Promise<BlingProduto> {
+  if (!produtoNeedsDetalhe(p)) return p;
+  try {
+    await new Promise((r) => setTimeout(r, DETALHE_DELAY_MS));
+    const json = await blingGet<{ data?: BlingProduto }>(
+      token,
+      `/produtos/${p.id}`,
+    );
+    return mergeProdutoDetalhe(p, json.data);
+  } catch {
+    return p;
   }
 }
 
@@ -354,9 +380,23 @@ async function upsertProduto(
   admin: Admin,
   conn: BlingConn,
   token: string,
-  p: BlingProduto,
+  raw: BlingProduto,
   opts?: ProdutoSyncOpts,
 ): Promise<boolean> {
+  let p = raw;
+  const detalheCounter = opts?.detalheCount;
+  const detalheLimit = opts?.detalheLimit ?? 0;
+  const canDetalhe =
+    !opts?.skipDetalhe &&
+    produtoNeedsDetalhe(p) &&
+    detalheLimit > 0 &&
+    (detalheCounter ? detalheCounter.n < detalheLimit : true);
+
+  if (canDetalhe) {
+    p = await enrichProdutoDetalhe(token, p);
+    if (detalheCounter) detalheCounter.n++;
+  }
+
   const sku = String(p.codigo ?? p.id);
   const blingFornId = p.fornecedor?.contato?.id ?? p.fornecedor?.id;
   const fornecedorId = await resolveFornecedorId(
@@ -429,6 +469,34 @@ async function upsertProduto(
   return true;
 }
 
+function buildProdutoSyncOpts(
+  incremental: boolean,
+  fullProduct?: boolean,
+  overrides?: ProdutoSyncOpts,
+): ProdutoSyncOpts {
+  const full = fullProduct ?? !incremental;
+  if (full) {
+    return {
+      skipEnrichment: false,
+      skipDetalhe: false,
+      enrichLimit: FULL_PRODUCT_ENRICH_LIMIT,
+      detalheLimit: FULL_PRODUCT_ENRICH_LIMIT,
+      enrichCount: { n: 0 },
+      detalheCount: { n: 0 },
+      ...overrides,
+    };
+  }
+  return {
+    skipEnrichment: incremental,
+    skipDetalhe: true,
+    enrichLimit: incremental ? 0 : DEFAULT_ENRICH_LIMIT,
+    detalheLimit: 0,
+    enrichCount: { n: 0 },
+    detalheCount: { n: 0 },
+    ...overrides,
+  };
+}
+
 async function syncProdutosPage(
   admin: Admin,
   conn: BlingConn,
@@ -460,6 +528,7 @@ async function syncProdutos(
   ctx: SyncContext,
   opts?: ProdutoSyncOpts,
 ): Promise<number> {
+  const pageSize = opts?.skipDetalhe === false ? FULL_PRODUCT_PAGE_SIZE : 100;
   let total = 0;
   let pagina = 1;
   for (;;) {
@@ -469,7 +538,7 @@ async function syncProdutos(
       token,
       ctx,
       pagina,
-      100,
+      pageSize,
       opts,
     );
     total += page.registros;
@@ -812,15 +881,22 @@ async function syncFilial(
   conn: BlingConn,
   entidades: SyncEntityId[],
   incremental: boolean,
-  syncOpts?: Pick<SyncRunOptions, "skipEnrichment" | "enrichLimit">,
+  syncOpts?: Pick<
+    SyncRunOptions,
+    "skipEnrichment" | "enrichLimit" | "fullProduct" | "skipDetalhe"
+  >,
 ) {
   const token = await ensureAccessToken(admin, conn);
   const ctx = buildSyncContext(conn, incremental, 365);
-  const produtoOpts: ProdutoSyncOpts = {
-    skipEnrichment: syncOpts?.skipEnrichment,
-    enrichLimit: syncOpts?.enrichLimit,
-    enrichCount: { n: 0 },
-  };
+  const produtoOpts = buildProdutoSyncOpts(
+    incremental,
+    syncOpts?.fullProduct,
+    {
+      skipEnrichment: syncOpts?.skipEnrichment,
+      enrichLimit: syncOpts?.enrichLimit,
+      skipDetalhe: syncOpts?.skipDetalhe,
+    },
+  );
   const results: Record<string, number> = {};
   const errors: string[] = [];
 
@@ -924,6 +1000,8 @@ export async function runBlingSync(
     options?.skipEnrichment ?? (incremental || options?.trigger === "cron");
   const enrichLimit =
     options?.enrichLimit ?? (skipEnrichment ? 0 : DEFAULT_ENRICH_LIMIT);
+  const fullProduct =
+    options?.fullProduct ?? (!incremental && options?.trigger !== "cron");
 
   if (entidades.length === 0) {
     throw new Error(
@@ -958,7 +1036,7 @@ export async function runBlingSync(
       conn,
       entidades,
       incremental,
-      { skipEnrichment, enrichLimit },
+      { skipEnrichment, enrichLimit, fullProduct },
     );
     allResults[conn.filial_id] = results;
     allErrors.push(...errors);
@@ -1035,6 +1113,7 @@ export type EntityPageRunOptions = {
   incremental?: boolean;
   skipEnrichment?: boolean;
   enrichLimit?: number;
+  fullProduct?: boolean;
 };
 
 export async function runBlingEntityPage(
@@ -1043,26 +1122,27 @@ export async function runBlingEntityPage(
 ) {
   const admin = createAdminClient() as Admin;
   const pagina = options.pagina ?? 1;
-  const limite =
-    options.entidade === "notas"
-      ? Math.min(options.limite ?? 100, 25)
-      : options.entidade === "vendas"
-        ? Math.min(options.limite ?? 100, 50)
-        : (options.limite ?? 100);
   const incremental = options.incremental ?? false;
-  const skipEnrichment = options.skipEnrichment ?? incremental;
-  const enrichLimit =
-    options.enrichLimit ?? (skipEnrichment ? 0 : DEFAULT_ENRICH_LIMIT);
+  const fullProduct =
+    options.fullProduct ??
+    (options.entidade === "produtos" && !incremental);
+  const limite =
+    options.entidade === "produtos" && fullProduct
+      ? FULL_PRODUCT_PAGE_SIZE
+      : options.entidade === "notas"
+        ? Math.min(options.limite ?? 100, 25)
+        : options.entidade === "vendas"
+          ? Math.min(options.limite ?? 100, 50)
+          : (options.limite ?? 100);
 
   const conn = await resolveBlingConnection(admin, orgId, options.filialId);
 
   const token = await ensureAccessToken(admin, conn);
   const ctx = buildSyncContext(conn, incremental, 365);
-  const produtoOpts: ProdutoSyncOpts = {
-    skipEnrichment,
-    enrichLimit,
-    enrichCount: { n: 0 },
-  };
+  const produtoOpts = buildProdutoSyncOpts(incremental, fullProduct, {
+    skipEnrichment: options.skipEnrichment,
+    enrichLimit: options.enrichLimit,
+  });
 
   let page: EntityPageResult = { registros: 0, hasMore: false, pagina };
   const t0 = Date.now();

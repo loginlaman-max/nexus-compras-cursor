@@ -24,6 +24,7 @@ export async function POST(request: Request) {
     limite?: number;
     incremental?: boolean;
     skip_enrichment?: boolean;
+    full_product?: boolean;
   };
 
   const orgId = body.org_id;
@@ -52,6 +53,7 @@ export async function POST(request: Request) {
       limite: body.limite ?? 100,
       incremental: body.incremental ?? false,
       skipEnrichment: body.skip_enrichment,
+      fullProduct: body.full_product,
     });
 
     return NextResponse.json(outcome);
