@@ -1,24 +1,61 @@
 "use client";
 
 import { GitFork, Plus, SquarePen, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useOrg } from "@/components/providers/org-provider";
 import {
   FILIAIS_SEED,
   type FilialConfig,
 } from "@/lib/configuracoes/config-data";
+import { upsertFilial } from "@/lib/filiais/supabase";
+import { isDemoMode } from "@/lib/supabase/env";
 import { nxStore } from "@/lib/store/nx-store";
 import { DField, SetDialog, SetHeader } from "./config-shared";
 
+function ufFromCidade(cidade: string): string {
+  return cidade.match(/\/\s*([A-Za-z]{2})\s*$/)?.[1]?.toUpperCase() ?? "";
+}
+
 export function SetFiliais({ onSaved }: { onSaved?: (msg: string) => void }) {
+  const { activeOrg } = useOrg();
   const [list, setList] = useState<FilialConfig[]>(() =>
     nxStore.get("filiais", FILIAIS_SEED),
   );
   const [edit, setEdit] = useState<FilialConfig | null>(null);
   const [del, setDel] = useState<FilialConfig | null>(null);
 
+  useEffect(() => {
+    if (isDemoMode()) return;
+    void Promise.all(
+      list.map((f) =>
+        upsertFilial(activeOrg.orgId, {
+          id: f.id,
+          nome: f.nome,
+          uf: ufFromCidade(f.cidade),
+          cnpj: f.cnpj,
+          is_cd: f.principal,
+        }),
+      ),
+    ).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeOrg.orgId]);
+
   const persist = (next: FilialConfig[]) => {
     setList(next);
     nxStore.set("filiais", next);
+    if (!isDemoMode()) {
+      void Promise.all(
+        next.map((f) =>
+          upsertFilial(activeOrg.orgId, {
+            id: f.id,
+            nome: f.nome,
+            uf: ufFromCidade(f.cidade),
+            cnpj: f.cnpj,
+            is_cd: f.principal,
+          }),
+        ),
+      ).catch((e) => console.warn("Sync filiais → Supabase:", e));
+    }
   };
 
   const blank = (): FilialConfig => ({

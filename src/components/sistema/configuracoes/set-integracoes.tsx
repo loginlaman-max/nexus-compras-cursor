@@ -20,8 +20,9 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
+import { useFiliaisIntegracao } from "@/hooks/use-filiais-integracao";
 import { useOrg } from "@/components/providers/org-provider";
-import { FILIAIS, type Filial } from "@/lib/mock";
+import type { Filial } from "@/lib/mock";
 import { isDemoMode } from "@/lib/supabase/env";
 import { nxStore } from "@/lib/store/nx-store";
 import { SetDialog, SetHeader } from "./config-shared";
@@ -96,9 +97,10 @@ export function SetIntegracoes({
 }) {
   const { activeOrg } = useOrg();
   const demo = isDemoMode();
+  const { filiais, loading: filiaisLoading } = useFiliaisIntegracao();
   const [tab, setTab] = useState<"catalogo" | "instalacoes">("catalogo");
   const [connect, setConnect] = useState<{ filialId: string } | null>(null);
-  const conectadas = FILIAIS.filter(
+  const conectadas = filiais.filter(
     (f) => f.bling?.status === "conectado",
   ).length;
   const [inst, setInst] = useState<Record<string, BlingInstState>>(() =>
@@ -286,11 +288,11 @@ export function SetIntegracoes({
     );
   };
 
-  const ativas = FILIAIS.filter((f) => {
+  const ativas = filiais.filter((f) => {
     const e = estadoDe(f);
     return e === "conectado" || e === "erro";
   });
-  const inativas = FILIAIS.filter((f) => estadoDe(f) === "desativado");
+  const inativas = filiais.filter((f) => estadoDe(f) === "desativado");
 
   return (
     <div className="nx-set-content">
@@ -326,7 +328,7 @@ export function SetIntegracoes({
               <span className="l">contas Bling ativas</span>
             </div>
             <div>
-              <span className="v">{FILIAIS.length - conectadas}</span>
+              <span className="v">{filiais.length - conectadas}</span>
               <span className="l">com atenção</span>
             </div>
             <div>
@@ -439,7 +441,7 @@ export function SetIntegracoes({
                     {it.conectado
                       ? "Já conectado"
                       : it.nome === "Bling ERP v3"
-                        ? conectadas + " de " + FILIAIS.length + " filiais"
+                        ? conectadas + " de " + filiais.length + " filiais"
                         : "Disponível"}
                   </span>
                   {it.nome === "Bling ERP v3" ? (
@@ -481,7 +483,7 @@ export function SetIntegracoes({
                     onManage?.({
                       nome: "Bling ERP v3",
                       filial:
-                        FILIAIS.find((f) => f.id === connect.filialId)?.nome ??
+                        filiais.find((f) => f.id === connect.filialId)?.nome ??
                         "",
                     });
                     setConnect(null);
@@ -513,8 +515,14 @@ export function SetIntegracoes({
               value={connect.filialId}
               onChange={(e) => setConnect({ filialId: e.target.value })}
             >
-              <option value="">Selecione a filial…</option>
-              {FILIAIS.map((f) => (
+              <option value="">
+                {filiaisLoading
+                  ? "Carregando filiais…"
+                  : filiais.length === 0
+                    ? "Nenhuma filial cadastrada"
+                    : "Selecione a filial…"}
+              </option>
+              {filiais.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.nome} · {f.uf}
                   {f.bling?.status === "conectado" ? " (já conectada)" : ""}
