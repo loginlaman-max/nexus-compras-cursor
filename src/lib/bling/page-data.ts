@@ -19,6 +19,7 @@ export interface SyncEntidade {
   last: string;
   registros: number;
   status: SyncStatus;
+  last_mensagem?: string | null;
   on: boolean;
 }
 
@@ -212,7 +213,7 @@ export const SYNC_LOGS_DEMO: SyncLogRow[] = [
   },
 ];
 
-export const BLING_CRON_INTERVAL_MIN = 30;
+export const BLING_CRON_INTERVAL_MIN = 24 * 60;
 export const BLING_RATE_LIMIT_RPS = 0.7;
 
 export const ENTITY_FUNCAO: Record<string, string> = {
@@ -224,6 +225,14 @@ export const ENTITY_FUNCAO: Record<string, string> = {
   notas: "bling-sync-notas",
   depositos: "bling-sync-depositos",
 };
+
+/** bling-sync-produtos ou bling-sync-chunk-produtos */
+export function entityIdFromSyncFuncao(funcao: string): string | null {
+  const match = funcao.match(/^bling-sync-(?:chunk-)?(\w+)$/);
+  const id = match?.[1];
+  if (!id || !(id in ENTITY_FUNCAO)) return null;
+  return id;
+}
 
 export const WEBHOOK_DEFS = [
   { k: "estoque", l: "Estoque", slug: "estoque", icon: Boxes },
@@ -315,24 +324,29 @@ export function buildEntidadeStats(
   logs: SyncLogDb[],
   counts: Record<string, number>,
 ): EntidadeStats[] {
-  const byFunc = new Map<string, SyncLogDb>();
+  const byEntity = new Map<string, SyncLogDb>();
   for (const log of logs) {
-    if (!log.funcao.startsWith("bling-sync-")) continue;
-    if (!byFunc.has(log.funcao)) byFunc.set(log.funcao, log);
+    const entityId = entityIdFromSyncFuncao(log.funcao);
+    if (!entityId) continue;
+    if (!byEntity.has(entityId)) byEntity.set(entityId, log);
   }
 
   return SYNC_ENTIDADES_BASE.map((base) => {
-    const funcao = ENTITY_FUNCAO[base.id];
-    const lastLog = funcao ? byFunc.get(funcao) : undefined;
+    const lastLog = byEntity.get(base.id);
     const registros = counts[base.id] ?? 0;
     let last_status: SyncStatus | null = null;
     if (lastLog) {
-      last_status =
+      const raw =
         lastLog.status === "sucesso" ||
         lastLog.status === "parcial" ||
         lastLog.status === "erro"
           ? lastLog.status
           : "erro";
+      if (raw === "erro" && registros > 0 && (lastLog.registros ?? 0) > 0) {
+        last_status = "parcial";
+      } else {
+        last_status = raw;
+      }
     } else if (registros > 0) {
       last_status = "sucesso";
     } else {
@@ -367,6 +381,7 @@ export function mergeEntidades(
       registros: st?.registros ?? 0,
       last: formatRelative(st?.last_sync_at ?? null),
       status: st?.last_status ?? "pendente",
+      last_mensagem: st?.last_mensagem ?? null,
     };
   });
 }

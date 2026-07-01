@@ -1400,7 +1400,7 @@ export async function runBlingEntityPage(
     await logSync(admin, {
       org_id: conn.org_id,
       filial_id: conn.filial_id,
-      funcao: `bling-sync-chunk-${options.entidade}`,
+      funcao: `bling-sync-${options.entidade}`,
       status: "erro",
       registros: page.registros,
       mensagem: e instanceof Error ? e.message : String(e),
@@ -1412,7 +1412,7 @@ export async function runBlingEntityPage(
   await logSync(admin, {
     org_id: conn.org_id,
     filial_id: conn.filial_id,
-    funcao: `bling-sync-chunk-${options.entidade}`,
+    funcao: `bling-sync-${options.entidade}`,
     status: "sucesso",
     registros: page.registros,
     duration_ms: Date.now() - t0,

@@ -28,6 +28,7 @@ import {
   BLING_RATE_LIMIT_RPS,
   defaultWebhooks,
   defaultWhAcoes,
+  entityIdFromSyncFuncao,
   formatRelative,
   logsToRows,
   mergeEntidades,
@@ -45,7 +46,6 @@ import {
   triggerEntitySync,
 } from "@/lib/bling/sync-client";
 import type { SyncEntityId } from "@/lib/bling/sync-summary";
-import { SYNC_ENTITY_ORDER } from "@/lib/bling/sync-summary";
 import { nxStore } from "@/lib/store/nx-store";
 import { isDemoMode } from "@/lib/supabase/env";
 import { toast } from "sonner";
@@ -109,12 +109,8 @@ function formatTokenRenewal(iso: string | null): string {
 }
 
 function entityFromLogFn(fn: string): SyncEntityId | null {
-  const match = fn.match(/bling-sync-(?:chunk-)?(\w+)/);
-  const id = match?.[1];
-  if (!id) return null;
-  return (SYNC_ENTITY_ORDER as readonly string[]).includes(id)
-    ? (id as SyncEntityId)
-    : null;
+  const id = entityIdFromSyncFuncao(fn);
+  return id ? (id as SyncEntityId) : null;
 }
 
 function copyText(text: string, onSaved?: (msg: string) => void) {
@@ -272,6 +268,7 @@ export function BlingPageView({
   const proximaSync = nextSyncLabel(
     status?.last_sync_at ?? primeira?.last_sync_at ?? null,
   );
+  const entidadesComErro = displayEnts.filter((e) => e.status === "erro").length;
 
   const credentialsReady =
     appCred.secret_set || !!status?.bling_configured;
@@ -581,7 +578,7 @@ export function BlingPageView({
           <p className="nx-rel-banner-sub">
             {demo
               ? "Modo demonstração — dados fictícios"
-              : "Integração OAuth 2.0 · sincronização automática a cada 30 minutos"}
+              : "Integração OAuth 2.0 · sync automática diária · botão ↻ por entidade"}
           </p>
         </div>
         <div
@@ -651,6 +648,24 @@ export function BlingPageView({
           {conectado ? "Reconectar" : "Conectar conta"}
         </button>
       </div>
+
+      {!demo && conectado && entidadesComErro > 0 && (
+        <div
+          className="card"
+          style={{
+            marginTop: 14,
+            padding: "14px 16px",
+            borderColor: "hsl(var(--destructive) / 0.35)",
+          }}
+        >
+          <p className="type-caption" style={{ margin: 0, lineHeight: 1.5 }}>
+            <strong>{entidadesComErro} entidade(s) com erro na última sync.</strong>{" "}
+            Abra a aba <strong>Sincronização</strong> → veja a coluna de mensagem
+            ou o histórico. Tente o botão <strong>↻</strong> em{" "}
+            <strong>Fornecedores</strong> e depois em <strong>Produtos</strong>.
+          </p>
+        </div>
+      )}
 
       {!demo && status && !conectado && (
         <div
@@ -815,6 +830,21 @@ export function BlingPageView({
                           </td>
                           <td>
                             <span className={`pill pill-${st.c}`}>{st.l}</span>
+                            {e.status === "erro" && e.last_mensagem && (
+                              <div
+                                className="type-caption"
+                                style={{
+                                  marginTop: 4,
+                                  color: "hsl(var(--destructive))",
+                                  maxWidth: 220,
+                                  lineHeight: 1.3,
+                                }}
+                                title={e.last_mensagem}
+                              >
+                                {e.last_mensagem.slice(0, 80)}
+                                {e.last_mensagem.length > 80 ? "…" : ""}
+                              </div>
+                            )}
                           </td>
                           <td style={{ textAlign: "right" }}>
                             <button
@@ -988,6 +1018,21 @@ export function BlingPageView({
                       </td>
                       <td>
                         <span className={`pill pill-${st.c}`}>{st.l}</span>
+                        {e.status === "erro" && e.last_mensagem && (
+                          <div
+                            className="type-caption"
+                            style={{
+                              marginTop: 4,
+                              color: "hsl(var(--destructive))",
+                              maxWidth: 220,
+                              lineHeight: 1.3,
+                            }}
+                            title={e.last_mensagem}
+                          >
+                            {e.last_mensagem.slice(0, 80)}
+                            {e.last_mensagem.length > 80 ? "…" : ""}
+                          </div>
+                        )}
                       </td>
                       <td style={{ textAlign: "right" }}>
                         <button
