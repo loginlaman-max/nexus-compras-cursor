@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getOrgMember } from "@/lib/auth/membership";
+import { filterSyncEntidades } from "@/lib/bling/api-client";
+import { runBlingSync } from "@/lib/bling/sync-runner";
 import { createClient } from "@/lib/supabase/server";
+
+/** Sync Bling pode levar dezenas de segundos em catálogos grandes. */
+export const maxDuration = 300;
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -17,7 +22,6 @@ export async function POST(request: Request) {
     entidades?: string[];
   };
   const orgId = body.org_id;
-  const filialId = body.filial_id;
   if (!orgId) {
     return NextResponse.json({ error: "org_id obrigatório" }, { status: 400 });
   }
@@ -27,34 +31,44 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const fnUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/bling-sync`;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!fnUrl || !serviceKey) {
+  const entidades = filterSyncEntidades(body.entidades);
+  if (entidades.length === 0) {
     return NextResponse.json(
-      { error: "Edge function não configurada" },
-      { status: 503 },
+      {
+        error:
+          "Nenhuma entidade suportada selecionada. Ative produtos, contatos, estoque ou vendas.",
+      },
+      { status: 400 },
     );
   }
 
-  const res = await fetch(fnUrl, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${serviceKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      org_id: orgId,
-      filial_id: filialId ?? null,
+  try {
+    const outcome = await runBlingSync(orgId, {
+      filialId: body.filial_id ?? null,
       entidades: body.entidades,
-    }),
-  });
+    });
 
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    return NextResponse.json(
-      { error: data.error ?? "Falha na sincronização" },
-      { status: res.status },
-    );
+    if (!outcome.ok && !outcome.partial) {
+      return NextResponse.json(
+        {
+          error: outcome.errors[0] ?? "Falha na sincronização",
+          errors: outcome.errors,
+        },
+        { status: 502 },
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      partial: outcome.partial,
+      results: outcome.results,
+      errors: outcome.errors.length ? outcome.errors : undefined,
+      message: outcome.partial
+        ? `Sync parcial: ${outcome.errors.join("; ")}`
+        : "Sincronização concluída",
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Falha na sincronização";
+    return NextResponse.json({ error: msg }, { status: 502 });
   }
-  return NextResponse.json(data);
 }

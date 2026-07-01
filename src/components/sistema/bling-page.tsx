@@ -36,6 +36,7 @@ import {
   type WebhookKey,
   type WhAcoes,
 } from "@/lib/bling/page-data";
+import { filterSyncEntidades } from "@/lib/bling/api-client";
 import { nxStore } from "@/lib/store/nx-store";
 import { isDemoMode } from "@/lib/supabase/env";
 import { toast } from "sonner";
@@ -295,18 +296,39 @@ export function BlingPageView({
     }
     setSyncing(true);
     try {
-      const entidades = displayEnts.filter((e) => e.on).map((e) => e.id);
+      const entidades = filterSyncEntidades(
+        displayEnts.filter((e) => e.on).map((e) => e.id),
+      );
+      if (entidades.length === 0) {
+        toast.error(
+          "Ative ao menos uma entidade suportada: produtos, contatos, estoque ou vendas.",
+        );
+        return;
+      }
+      const filialId =
+        primeira?.filial_id ??
+        status?.conexoes?.find((c) => c.status === "conectado")?.filial_id;
+
       const res = await fetch("/api/bling/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ org_id: activeOrg.orgId, entidades }),
+        body: JSON.stringify({
+          org_id: activeOrg.orgId,
+          filial_id: filialId,
+          entidades,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Falha na sync");
       await loadStatus();
       await refreshCatalog();
-      toast.success("Sincronização concluída");
-      onSaved?.("Sincronização concluída");
+      if (data.partial) {
+        toast.warning(data.message ?? "Sincronização parcial");
+        onSaved?.(data.message ?? "Sincronização parcial");
+      } else {
+        toast.success("Sincronização concluída");
+        onSaved?.("Sincronização concluída");
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erro na sincronização");
     } finally {
