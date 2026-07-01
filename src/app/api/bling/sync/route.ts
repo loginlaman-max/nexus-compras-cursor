@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          "Nenhuma entidade suportada selecionada. Ative produtos, contatos, estoque ou vendas.",
+          "Nenhuma entidade suportada selecionada. Ative contatos, pedidos, produtos, estoque, notas ou vendas.",
       },
       { status: 400 },
     );

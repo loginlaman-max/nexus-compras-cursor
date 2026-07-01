@@ -307,7 +307,7 @@ export function BlingPageView({
       );
       if (entidades.length === 0) {
         toast.error(
-          "Ative ao menos uma entidade suportada: produtos, contatos, estoque ou vendas.",
+          "Ative ao menos uma entidade: contatos, pedidos, produtos, estoque, notas ou vendas.",
         );
         return;
       }

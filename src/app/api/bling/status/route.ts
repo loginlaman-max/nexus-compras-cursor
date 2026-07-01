@@ -42,7 +42,8 @@ export async function GET(request: Request) {
     prodCount,
     fornCount,
     estCount,
-    notasCount,
+    nfeCount,
+    pedCount,
     vendasCount,
     filiaisCount,
   ] = await Promise.all([
@@ -71,7 +72,11 @@ export async function GET(request: Request) {
       .select("*", { count: "exact", head: true })
       .eq("org_id", orgId),
     supabase
-      .from("notas_fiscais")
+      .from("nfe_entrada")
+      .select("*", { count: "exact", head: true })
+      .eq("org_id", orgId),
+    supabase
+      .from("pedidos_compra")
       .select("*", { count: "exact", head: true })
       .eq("org_id", orgId),
     supabase
@@ -96,10 +101,10 @@ export async function GET(request: Request) {
     produtos: prodCount.count ?? 0,
     contatos: fornCount.count ?? 0,
     estoque: estCount.count ?? 0,
-    notas: notasCount.count ?? 0,
+    notas: nfeCount.count ?? 0,
     vendas: vendasCount.count ?? 0,
     depositos: filiaisCount.count ?? 0,
-    pedidos: 0,
+    pedidos: pedCount.count ?? 0,
   };
 
   const entidades = buildEntidadeStats(logsList, counts);
@@ -144,6 +149,7 @@ export async function GET(request: Request) {
       fornecedores: counts.contatos,
       estoque_linhas: counts.estoque,
       notas: counts.notas,
+      pedidos: counts.pedidos,
       vendas_linhas: counts.vendas,
       filiais: counts.depositos,
     },

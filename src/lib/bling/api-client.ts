@@ -106,6 +106,7 @@ export async function fetchAllPages<T>(
   token: string,
   path: string,
   limite = 100,
+  extraParams?: Record<string, string>,
 ): Promise<T[]> {
   const all: T[] = [];
   let pagina = 1;
@@ -113,6 +114,7 @@ export async function fetchAllPages<T>(
     const json = await blingGet<{ data?: T[] }>(token, path, {
       pagina: String(pagina),
       limite: String(limite),
+      ...extraParams,
     });
     const batch = json.data ?? [];
     all.push(...batch);
